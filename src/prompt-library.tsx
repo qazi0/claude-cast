@@ -41,6 +41,14 @@ const CATEGORIES: PromptCategory[] = [
   "advanced",
 ];
 
+// Convert camelCase to Title Case (e.g., "projectPath" -> "Project Path")
+function formatVariableName(name: string): string {
+  return name
+    .replace(/([A-Z])/g, " $1") // Add space before capitals
+    .replace(/^./, (str) => str.toUpperCase()) // Capitalize first letter
+    .trim();
+}
+
 export default function PromptLibrary() {
   const [isLoading, setIsLoading] = useState(true);
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
@@ -107,7 +115,8 @@ export default function PromptLibrary() {
               return (
                 <List.Dropdown.Item
                   key={cat}
-                  title={`${info.icon} ${info.name}`}
+                  icon={{ source: info.icon, tintColor: info.tintColor }}
+                  title={info.name}
                   value={cat}
                 />
               );
@@ -123,7 +132,7 @@ export default function PromptLibrary() {
             return (
               <List.Section
                 key={category}
-                title={`${info.icon} ${info.name}`}
+                title={info.name}
                 subtitle={`${catPrompts.length} prompts`}
               >
                 {catPrompts.map((prompt) => (
@@ -208,8 +217,12 @@ function PromptItem({
 
   return (
     <List.Item
-      title={`${prompt.icon || info.icon} ${prompt.name}`}
+      title={prompt.name}
       subtitle={prompt.description}
+      icon={{
+        source: prompt.icon || info.icon,
+        tintColor: prompt.tintColor || info.tintColor,
+      }}
       accessories={accessories}
       actions={
         <ActionPanel>
@@ -411,8 +424,10 @@ function PromptVariablesForm({
       const context = await captureContext();
       const fullPrompt = substituteVariables(prompt.prompt, processedValues);
       await incrementUsageCount(prompt.id);
+      // Use user-specified projectPath if provided, otherwise fall back to context
+      const targetPath = processedValues.projectPath || context.projectPath;
       await launchClaudeCode({
-        projectPath: context.projectPath,
+        projectPath: targetPath,
         prompt: fullPrompt,
       });
       await popToRoot();
@@ -446,7 +461,7 @@ function PromptVariablesForm({
             <Form.FilePicker
               key={variable.name}
               id={variable.name}
-              title={variable.name}
+              title={formatVariableName(variable.name)}
               info={variable.description}
               allowMultipleSelection={false}
               canChooseDirectories={variable.allowDirectories !== false}
@@ -466,7 +481,7 @@ function PromptVariablesForm({
             <React.Fragment key={variable.name}>
               <Form.Dropdown
                 id={`${variable.name}_mode`}
-                title={`${variable.name} Input Type`}
+                title={`${formatVariableName(variable.name)} Input Type`}
                 value={currentMode}
                 onChange={(value) => {
                   setInputModes((prev) => ({
@@ -490,7 +505,7 @@ function PromptVariablesForm({
               {currentMode === "code" ? (
                 <Form.TextArea
                   id={variable.name}
-                  title={variable.name}
+                  title={formatVariableName(variable.name)}
                   placeholder={variable.description}
                   defaultValue={codeContext || variable.default}
                   info={variable.description}
@@ -498,7 +513,7 @@ function PromptVariablesForm({
               ) : (
                 <Form.FilePicker
                   id={variable.name}
-                  title={variable.name}
+                  title={formatVariableName(variable.name)}
                   info={`Select a repository folder for: ${variable.description}`}
                   allowMultipleSelection={false}
                   canChooseDirectories={true}
@@ -518,7 +533,7 @@ function PromptVariablesForm({
             <Form.TextArea
               key={variable.name}
               id={variable.name}
-              title={variable.name}
+              title={formatVariableName(variable.name)}
               placeholder={variable.description}
               defaultValue={codeContext || variable.default}
               info={variable.description}
@@ -532,7 +547,7 @@ function PromptVariablesForm({
             <Form.TextArea
               key={variable.name}
               id={variable.name}
-              title={variable.name}
+              title={formatVariableName(variable.name)}
               placeholder={variable.description}
               defaultValue={codeContext || variable.default}
               info={variable.description}
@@ -545,7 +560,7 @@ function PromptVariablesForm({
           <Form.TextField
             key={variable.name}
             id={variable.name}
-            title={variable.name}
+            title={formatVariableName(variable.name)}
             placeholder={variable.description}
             defaultValue={variable.default}
             info={variable.description}
