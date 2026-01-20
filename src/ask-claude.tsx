@@ -23,10 +23,6 @@ import {
 } from "./lib/context-capture";
 import { launchClaudeCode } from "./lib/terminal";
 
-interface Preferences {
-  defaultModel: "sonnet" | "opus" | "haiku";
-}
-
 const MODEL_OPTIONS = [
   { title: "Sonnet (Balanced)", value: "sonnet" },
   { title: "Opus (Most Capable)", value: "opus" },

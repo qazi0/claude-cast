@@ -4,10 +4,6 @@ import { promisify } from "util";
 
 const execPromise = promisify(exec);
 
-interface Preferences {
-  terminalApp: string;
-}
-
 type TerminalApp = "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty";
 
 /**

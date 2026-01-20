@@ -138,8 +138,6 @@ export async function getDailyStats(days: number = 7): Promise<DailyStats[]> {
  */
 function calculateStats(sessions: SessionMetadata[]): UsageStats {
   let totalCost = 0;
-  const totalInputTokens = 0;
-  const totalOutputTokens = 0;
   const sessionsByProject: Record<string, { count: number; cost: number }> = {};
 
   for (const session of sessions) {
@@ -162,8 +160,9 @@ function calculateStats(sessions: SessionMetadata[]): UsageStats {
   return {
     totalSessions: sessions.length,
     totalCost,
-    totalInputTokens,
-    totalOutputTokens,
+    // Token counts not available in session metadata - would require parsing full session files
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
     sessionsByProject,
     topSessions,
   };

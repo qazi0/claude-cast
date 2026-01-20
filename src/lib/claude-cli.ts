@@ -7,13 +7,6 @@ import os from "os";
 
 const execPromise = promisify(exec);
 
-interface Preferences {
-  defaultModel: "sonnet" | "opus" | "haiku";
-  terminalApp: string;
-  claudeCodePath?: string;
-  oauthToken?: string;
-}
-
 export interface ClaudeResponse {
   result: string;
   session_id?: string;
