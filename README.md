@@ -109,13 +109,29 @@ Detailed cost and usage metrics.
    npm run dev
    ```
 
-## Configuration
+## Setup
+
+### OAuth Token (Required for API Features)
+
+Some features (Ask Claude Code, Transform Selection, Git Actions) require an OAuth token to work in Raycast's sandboxed environment:
+
+1. Generate a long-lived OAuth token:
+   ```bash
+   claude setup-token
+   ```
+
+2. Copy the token and add it to ClaudeCast preferences:
+   - Open Raycast → Search "ClaudeCast" → Press `⌘,`
+   - Paste the token in the "OAuth Token" field
+
+### Configuration
 
 Open Raycast preferences and configure ClaudeCast:
 
 - **Default Model**: Choose between Sonnet (balanced), Opus (most capable), or Haiku (fastest)
 - **Terminal Application**: Select your preferred terminal (Terminal, iTerm, Warp, Kitty, Ghostty)
 - **Claude Code Path**: Optionally specify a custom path to the Claude CLI binary
+- **OAuth Token**: Long-lived token from `claude setup-token` (required for API features)
 
 ## Usage
 
