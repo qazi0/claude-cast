@@ -4,8 +4,6 @@ import { listAllSessions, SessionMetadata } from "./session-parser";
 export interface UsageStats {
   totalSessions: number;
   totalCost: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
   sessionsByProject: Record<string, { count: number; cost: number }>;
   topSessions: SessionMetadata[];
 }
@@ -14,8 +12,6 @@ export interface DailyStats {
   date: string;
   sessions: number;
   cost: number;
-  inputTokens: number;
-  outputTokens: number;
 }
 
 const STATS_CACHE_KEY = "claudecast-stats-cache";
@@ -125,8 +121,6 @@ export async function getDailyStats(days: number = 7): Promise<DailyStats[]> {
       date: date.toISOString().split("T")[0],
       sessions: stats.totalSessions,
       cost: stats.totalCost,
-      inputTokens: stats.totalInputTokens,
-      outputTokens: stats.totalOutputTokens,
     });
   }
 
@@ -160,9 +154,6 @@ function calculateStats(sessions: SessionMetadata[]): UsageStats {
   return {
     totalSessions: sessions.length,
     totalCost,
-    // Token counts not available in session metadata - would require parsing full session files
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
     sessionsByProject,
     topSessions,
   };
@@ -176,19 +167,6 @@ export function formatCost(cost: number): string {
     return `$${cost.toFixed(4)}`;
   }
   return `$${cost.toFixed(2)}`;
-}
-
-/**
- * Format token count
- */
-export function formatTokens(tokens: number): string {
-  if (tokens >= 1000000) {
-    return `${(tokens / 1000000).toFixed(1)}M`;
-  }
-  if (tokens >= 1000) {
-    return `${(tokens / 1000).toFixed(1)}K`;
-  }
-  return tokens.toString();
 }
 
 /**
