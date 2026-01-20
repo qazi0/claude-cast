@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import readline from "readline";
+import { trash } from "@raycast/api";
 
 export interface SessionMetadata {
   id: string;
@@ -366,7 +367,7 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
   if (!session) return false;
 
   try {
-    await fs.promises.unlink(session.filePath);
+    await trash(session.filePath);
     return true;
   } catch {
     return false;
