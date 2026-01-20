@@ -8,6 +8,7 @@ import {
   Toast,
   popToRoot,
   Color,
+  useNavigation,
 } from "@raycast/api";
 import { useState, useEffect } from "react";
 import { exec } from "child_process";
@@ -192,8 +193,8 @@ function GitActionItem({
   isDisabled: boolean;
   disabledReason?: string;
 }) {
+  const { push } = useNavigation();
   const [, setIsExecuting] = useState(false);
-  const [result, setResult] = useState<ClaudeResponse | null>(null);
 
   async function executeAction() {
     if (isDisabled) {
@@ -238,8 +239,16 @@ function GitActionItem({
         cwd: projectPath,
       });
 
-      setResult(response);
       await showToast({ style: Toast.Style.Success, title: "Done" });
+
+      // Push to result view
+      push(
+        <GitActionResult
+          action={action}
+          result={response}
+          projectPath={projectPath}
+        />,
+      );
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -249,17 +258,6 @@ function GitActionItem({
     } finally {
       setIsExecuting(false);
     }
-  }
-
-  if (result) {
-    return (
-      <GitActionResult
-        action={action}
-        result={result}
-        projectPath={projectPath}
-        onBack={() => setResult(null)}
-      />
-    );
   }
 
   const accessories: List.Item.Accessory[] = [];
@@ -301,13 +299,12 @@ function GitActionResult({
   action,
   result,
   projectPath,
-  onBack,
 }: {
   action: GitAction;
   result: ClaudeResponse;
   projectPath: string;
-  onBack: () => void;
 }) {
+  const { pop } = useNavigation();
   const isCommitMessage = action.id === "write-commit";
 
   async function handleCommit() {
@@ -324,7 +321,7 @@ function GitActionResult({
       });
 
       await showToast({ style: Toast.Style.Success, title: "Commit created!" });
-      onBack();
+      pop();
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -383,7 +380,7 @@ function GitActionResult({
               title="Back to Actions"
               icon={Icon.ArrowLeft}
               shortcut={{ modifiers: ["cmd"], key: "[" }}
-              onAction={onBack}
+              onAction={pop}
             />
             <Action
               title="Continue in Terminal"

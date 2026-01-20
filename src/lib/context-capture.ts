@@ -53,54 +53,135 @@ async function detectVSCodeProject(): Promise<{
   projectPath?: string;
   currentFile?: string;
 }> {
-  try {
-    const frontmost = await getFrontmostApplication();
+  // Editors to check (in order of preference)
+  const editors = ["Cursor", "Code", "Code - Insiders", "VSCodium"];
 
-    // Check if VS Code or similar editor is frontmost
-    const editors = [
-      "Code",
-      "Code - Insiders",
-      "Cursor",
-      "VSCodium",
-      "Visual Studio Code",
-    ];
-    if (!editors.some((e) => frontmost.name.includes(e))) {
-      return {};
-    }
+  // Try to get window title from each editor via AppleScript
+  for (const editorProcess of editors) {
+    try {
+      const { stdout } = await execPromise(
+        `osascript -e 'tell application "System Events" to tell process "${editorProcess}" to get name of front window' 2>/dev/null`,
+        { timeout: 2000 },
+      );
 
-    // Try to get window title using AppleScript
-    const { stdout } = await execPromise(`
-      osascript -e '
-        tell application "System Events"
-          tell process "${frontmost.name}"
-            get name of front window
-          end tell
-        end tell
-      '
-    `);
-
-    const windowTitle = stdout.trim();
-    // VS Code window title format: "filename - folder - VS Code"
-    // or "folder - VS Code"
-    const parts = windowTitle.split(" - ");
-
-    let currentFile: string | undefined;
-    let projectPath: string | undefined;
-
-    if (parts.length >= 2) {
-      // Check if first part looks like a file
-      if (parts[0].includes(".")) {
-        currentFile = parts[0];
-        projectPath = await findProjectPath(parts[1]);
-      } else {
-        projectPath = await findProjectPath(parts[0]);
+      const windowTitle = stdout.trim();
+      if (windowTitle) {
+        const result = parseVSCodeWindowTitle(windowTitle);
+        if (result.projectPath) {
+          const fullPath = await findProjectPath(result.projectPath);
+          if (fullPath) {
+            return { projectPath: fullPath, currentFile: result.currentFile };
+          }
+        }
       }
+    } catch {
+      // Editor not running or no window, try next
     }
-
-    return { projectPath, currentFile };
-  } catch {
-    return {};
   }
+
+  // Fallback: check recent workspaces from storage
+  const recentProject = await getVSCodeRecentWorkspace();
+  if (recentProject) {
+    return { projectPath: recentProject };
+  }
+
+  return {};
+}
+
+/**
+ * Parse VS Code window title to extract project and file info
+ */
+function parseVSCodeWindowTitle(windowTitle: string): {
+  projectPath?: string;
+  currentFile?: string;
+} {
+  // VS Code window title format: "filename - folder - VS Code"
+  // or "folder - VS Code"
+  const parts = windowTitle.split(" - ");
+
+  let currentFile: string | undefined;
+  let projectPath: string | undefined;
+
+  if (parts.length >= 2) {
+    // Check if first part looks like a file
+    if (parts[0].includes(".")) {
+      currentFile = parts[0];
+      projectPath = parts[1];
+    } else {
+      projectPath = parts[0];
+    }
+  }
+
+  return { projectPath, currentFile };
+}
+
+/**
+ * Get the most recent VS Code workspace from storage
+ */
+async function getVSCodeRecentWorkspace(): Promise<string | undefined> {
+  // VS Code stores recent workspaces in globalStorage
+  const storagePaths = [
+    path.join(
+      os.homedir(),
+      "Library/Application Support/Code/User/globalStorage/storage.json",
+    ),
+    path.join(
+      os.homedir(),
+      "Library/Application Support/Cursor/User/globalStorage/storage.json",
+    ),
+  ];
+
+  for (const storagePath of storagePaths) {
+    try {
+      const data = await fs.promises.readFile(storagePath, "utf-8");
+      const storage = JSON.parse(data);
+
+      // Method 1: Check backupWorkspaces.folders (most reliable for current folder)
+      const backupFolders = storage.backupWorkspaces?.folders || [];
+      for (const folder of backupFolders) {
+        const folderUri = folder.folderUri;
+        if (folderUri) {
+          const cleanPath = folderUri.startsWith("file://")
+            ? decodeURIComponent(folderUri.replace("file://", ""))
+            : folderUri;
+          try {
+            await fs.promises.access(cleanPath);
+            await fs.promises.access(path.join(cleanPath, ".git"));
+            return cleanPath;
+          } catch {
+            // Not a git repo or doesn't exist, continue
+          }
+        }
+      }
+
+      // Method 2: Check recent menu items
+      const fileMenu = storage.lastKnownMenubarData?.menus?.File;
+      if (fileMenu?.items) {
+        const recentMenu = fileMenu.items.find(
+          (item: { id?: string }) =>
+            item.id === "submenuitem.MenubarRecentMenu",
+        );
+        if (recentMenu?.submenu?.items) {
+          for (const item of recentMenu.submenu.items) {
+            if (item.id === "openRecentFolder" && item.uri?.path) {
+              const folderPath = item.uri.path;
+              try {
+                await fs.promises.access(folderPath);
+                await fs.promises.access(path.join(folderPath, ".git"));
+                return folderPath;
+              } catch {
+                // Not a git repo or doesn't exist, continue
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Storage file doesn't exist or can't be parsed, try next
+    }
+  }
+
+  return undefined;
 }
 
 /**
