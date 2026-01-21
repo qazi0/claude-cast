@@ -1,21 +1,19 @@
-# ClaudeCast
+<p align="center">
+  <img src="assets/command-icon.png" alt="ClaudeCast Icon" width="128" height="128">
+</p>
 
-**Claude Code workflows at your fingertips** - A comprehensive Raycast extension that bridges Claude Code's powerful agentic CLI with Raycast's instant-access UI.
+<h1 align="center">ClaudeCast</h1>
+
+<p align="center">
+  <strong>Claude Code workflows at your fingertips</strong><br>
+  A comprehensive Raycast extension that bridges Claude Code's powerful agentic CLI with Raycast's instant-access UI.
+</p>
+
+---
 
 ## Features
 
-### Phase 1: Core Features
-
-#### Ask Claude Code
-Quick prompt with automatic context capture from VS Code. Select text anywhere, hit the hotkey, and get answers without opening a terminal.
-
-- Auto-detects current project from VS Code
-- Captures selected text and clipboard
-- Shows git branch context
-- Supports all Claude models (Sonnet, Opus, Haiku)
-- Continue conversation in terminal
-
-#### Launch Project
+### Launch Project
 Fast project switching for Claude Code. Browse all your projects with favorites, recents, and session counts.
 
 - Discovers projects from Claude Code history
@@ -24,7 +22,7 @@ Fast project switching for Claude Code. Browse all your projects with favorites,
 - Open in VS Code or Finder
 - Manage favorites
 
-#### Browse Sessions
+### Browse Sessions
 Find and resume any Claude Code conversation across all projects.
 
 - Search sessions by content
@@ -33,22 +31,12 @@ Find and resume any Claude Code conversation across all projects.
 - Resume, fork, or delete sessions
 - See cost and token usage per session
 
-#### Quick Continue
-One keystroke to continue your last Claude Code session. No UI - just launches directly.
-
-#### Git Actions
-Git-aware Claude Code workflows for common tasks.
-
-- Review staged changes
-- Generate commit messages
-- Explain recent diffs
-- Review unstaged changes
-- Summarize branch changes
-
-### Phase 2: Power User Features
-
-#### Prompt Library
+### Prompt Library
 Curated collection of production-tested prompts with variable substitution.
+
+<p align="center">
+  <img src="metadata/claudecast-8.png" alt="Prompt Library - Categories" width="600">
+</p>
 
 **Categories:**
 - Planning & Architecture
@@ -59,8 +47,42 @@ Curated collection of production-tested prompts with variable substitution.
 - Documentation
 - Advanced Multi-Step Workflows
 
-#### Transform Selection
+<p align="center">
+  <img src="metadata/claudecast-9.png" alt="Prompt Library - More Prompts" width="600">
+</p>
+
+### Git Actions
+Git-aware Claude Code workflows for common tasks.
+
+<p align="center">
+  <img src="metadata/claudecast-7.png" alt="Git Actions Menu" width="600">
+</p>
+
+- Review staged changes
+- Generate commit messages
+- Explain recent diffs
+- Review unstaged changes
+- Summarize branch changes
+
+<p align="center">
+  <img src="metadata/claudecast-6.png" alt="Git Actions Result" width="600">
+</p>
+
+### Ask Claude Code
+Quick prompt with automatic context capture from VS Code. Select text anywhere, hit the hotkey, and get answers without opening a terminal.
+
+- Auto-detects current project from VS Code
+- Captures selected text and clipboard
+- Shows git branch context
+- Supports all Claude models (Sonnet, Opus, Haiku)
+- Continue conversation in terminal
+
+### Transform Selection
 One-keystroke code transformations from any app.
+
+<p align="center">
+  <img src="metadata/claudecast-3.png" alt="Transform Selection Menu" width="600">
+</p>
 
 - Explain code
 - Explain regex
@@ -71,14 +93,21 @@ One-keystroke code transformations from any app.
 - Add comments
 - Write tests
 
-#### Menu Bar Monitor
+<p align="center">
+  <img src="metadata/claudecast-5.png" alt="Transform Selection Result" width="600">
+</p>
+
+### Quick Continue
+One keystroke to continue your last Claude Code session. No UI - just launches directly.
+
+### Menu Bar Monitor
 Real-time Claude Code status in your menu bar.
 
 - Active session indicator
 - Today's cost and session count
 - Quick access to all commands
 
-#### Usage Dashboard
+### Usage Dashboard
 Detailed cost and usage metrics.
 
 - Daily/weekly/monthly trends
