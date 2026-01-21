@@ -34,9 +34,7 @@ Find and resume any Claude Code conversation across all projects.
 ### Prompt Library
 Curated collection of production-tested prompts with variable substitution.
 
-<p align="center">
-  <img src="metadata/claudecast-8.png" alt="Prompt Library - Categories" width="600">
-</p>
+![Prompt Library - Categories](metadata/claudecast-8.png)
 
 **Categories:**
 - Planning & Architecture
@@ -47,16 +45,12 @@ Curated collection of production-tested prompts with variable substitution.
 - Documentation
 - Advanced Multi-Step Workflows
 
-<p align="center">
-  <img src="metadata/claudecast-9.png" alt="Prompt Library - More Prompts" width="600">
-</p>
+![Prompt Library - More Prompts](metadata/claudecast-9.png)
 
 ### Git Actions
 Git-aware Claude Code workflows for common tasks.
 
-<p align="center">
-  <img src="metadata/claudecast-7.png" alt="Git Actions Menu" width="600">
-</p>
+![Git Actions Menu](metadata/claudecast-7.png)
 
 - Review staged changes
 - Generate commit messages
@@ -64,9 +58,7 @@ Git-aware Claude Code workflows for common tasks.
 - Review unstaged changes
 - Summarize branch changes
 
-<p align="center">
-  <img src="metadata/claudecast-6.png" alt="Git Actions Result" width="600">
-</p>
+![Git Actions Result](metadata/claudecast-6.png)
 
 ### Ask Claude Code
 Quick prompt with automatic context capture from VS Code. Select text anywhere, hit the hotkey, and get answers without opening a terminal.
@@ -80,9 +72,7 @@ Quick prompt with automatic context capture from VS Code. Select text anywhere, 
 ### Transform Selection
 One-keystroke code transformations from any app.
 
-<p align="center">
-  <img src="metadata/claudecast-3.png" alt="Transform Selection Menu" width="600">
-</p>
+![Transform Selection Menu](metadata/claudecast-3.png)
 
 - Explain code
 - Explain regex
@@ -93,9 +83,7 @@ One-keystroke code transformations from any app.
 - Add comments
 - Write tests
 
-<p align="center">
-  <img src="metadata/claudecast-5.png" alt="Transform Selection Result" width="600">
-</p>
+![Transform Selection Result](metadata/claudecast-5.png)
 
 ### Quick Continue
 One keystroke to continue your last Claude Code session. No UI - just launches directly.
