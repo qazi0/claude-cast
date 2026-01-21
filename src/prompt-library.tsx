@@ -27,10 +27,6 @@ import { executePrompt, ClaudeResponse } from "./lib/claude-cli";
 import { captureContext, getCodeContext } from "./lib/context-capture";
 import { launchClaudeCode } from "./lib/terminal";
 
-interface Preferences {
-  defaultModel: "sonnet" | "opus" | "haiku";
-}
-
 const CATEGORIES: PromptCategory[] = [
   "planning",
   "tdd",
@@ -578,13 +574,22 @@ function ExecutingPromptView({
   prompt: PromptTemplate;
   variables: Record<string, string>;
 }) {
+  // Uses auto-generated Preferences type from raycast-env.d.ts
   const preferences = getPreferenceValues<Preferences>();
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<ClaudeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projectPath, setProjectPath] = useState<string | undefined>();
+  // Track if we've already executed to prevent re-running on re-renders
+  const hasExecutedRef = React.useRef(false);
 
   useEffect(() => {
+    // Guard against re-execution (React 18 strict mode or re-renders)
+    if (hasExecutedRef.current) {
+      return;
+    }
+    hasExecutedRef.current = true;
+
     async function execute() {
       try {
         // Get project context
@@ -612,6 +617,8 @@ function ExecutingPromptView({
     }
 
     execute();
+    // Run only once on mount - variables are captured in closure
+    // eslint-disable-next-line
   }, []);
 
   if (isLoading) {

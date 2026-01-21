@@ -71,8 +71,16 @@ export default function BrowseSessions() {
           key={session.id}
           session={session}
           onDelete={async () => {
-            await deleteSession(session.id);
-            loadSessions();
+            try {
+              await deleteSession(session.id);
+              loadSessions();
+            } catch (error) {
+              await showToast({
+                style: Toast.Style.Failure,
+                title: "Failed to delete session",
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }
           }}
         />
       ))}

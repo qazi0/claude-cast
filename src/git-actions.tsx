@@ -19,6 +19,9 @@ import { launchClaudeCode } from "./lib/terminal";
 
 const execPromise = promisify(exec);
 
+// Enum for explicit change requirements (more robust than string matching)
+type ChangeRequirement = "staged" | "unstaged" | "any" | "none";
+
 interface GitAction {
   id: string;
   title: string;
@@ -26,7 +29,8 @@ interface GitAction {
   icon: Icon;
   prompt: string;
   gitCommand: string;
-  requiresChanges: boolean;
+  /** What type of changes this action requires */
+  changeRequirement: ChangeRequirement;
   tintColor?: Color;
 }
 
@@ -39,7 +43,7 @@ const GIT_ACTIONS: GitAction[] = [
     prompt:
       "Review these staged changes. Look for bugs, potential issues, code quality concerns, and suggest improvements. Be specific about file names and line numbers.",
     gitCommand: "git diff --staged",
-    requiresChanges: true,
+    changeRequirement: "staged",
     tintColor: Color.Blue,
   },
   {
@@ -61,7 +65,7 @@ Rules:
 
 Return ONLY the commit message, nothing else.`,
     gitCommand: "git diff --staged",
-    requiresChanges: true,
+    changeRequirement: "staged",
     tintColor: Color.Green,
   },
   {
@@ -72,7 +76,7 @@ Return ONLY the commit message, nothing else.`,
     prompt:
       "Explain these changes in plain English. What was changed, why it might have been changed, and what effect it has. Be concise but thorough.",
     gitCommand: "git diff HEAD~1",
-    requiresChanges: false,
+    changeRequirement: "none",
     tintColor: Color.Purple,
   },
   {
@@ -83,7 +87,7 @@ Return ONLY the commit message, nothing else.`,
     prompt:
       "Review these unstaged changes. Identify any issues, suggest improvements, and note anything that looks incomplete or problematic.",
     gitCommand: "git diff",
-    requiresChanges: true,
+    changeRequirement: "unstaged",
     tintColor: Color.Orange,
   },
   {
@@ -94,7 +98,7 @@ Return ONLY the commit message, nothing else.`,
     prompt:
       "Summarize all the changes on this branch compared to main. Group by feature/area, highlight key changes, and provide a high-level overview suitable for a PR description.",
     gitCommand: "git diff main...HEAD",
-    requiresChanges: false,
+    changeRequirement: "none",
     tintColor: Color.Yellow,
   },
 ];
@@ -154,12 +158,36 @@ export default function GitActions() {
         subtitle={gitStatus.branch ? `on ${gitStatus.branch}` : undefined}
       >
         {GIT_ACTIONS.map((action) => {
-          const isDisabled =
-            action.requiresChanges &&
-            ((action.gitCommand.includes("staged") &&
-              !gitStatus.hasStagedChanges) ||
-              (action.gitCommand === "git diff" &&
-                !gitStatus.hasUnstagedChanges));
+          // Check if action is disabled based on explicit change requirement
+          let isDisabled = false;
+          let disabledReason: string | undefined;
+
+          switch (action.changeRequirement) {
+            case "staged":
+              if (!gitStatus.hasStagedChanges) {
+                isDisabled = true;
+                disabledReason = "No staged changes";
+              }
+              break;
+            case "unstaged":
+              if (!gitStatus.hasUnstagedChanges) {
+                isDisabled = true;
+                disabledReason = "No unstaged changes";
+              }
+              break;
+            case "any":
+              if (
+                !gitStatus.hasStagedChanges &&
+                !gitStatus.hasUnstagedChanges
+              ) {
+                isDisabled = true;
+                disabledReason = "No changes";
+              }
+              break;
+            case "none":
+              // No changes required
+              break;
+          }
 
           return (
             <GitActionItem
@@ -167,13 +195,7 @@ export default function GitActions() {
               action={action}
               projectPath={context.projectPath!}
               isDisabled={isDisabled}
-              disabledReason={
-                isDisabled
-                  ? action.gitCommand.includes("staged")
-                    ? "No staged changes"
-                    : "No unstaged changes"
-                  : undefined
-              }
+              disabledReason={disabledReason}
             />
           );
         })}
@@ -218,7 +240,7 @@ function GitActionItem({
         cwd: projectPath,
       });
 
-      if (!diff.trim() && action.requiresChanges) {
+      if (!diff.trim() && action.changeRequirement !== "none") {
         await showToast({
           style: Toast.Style.Failure,
           title: "No changes found",

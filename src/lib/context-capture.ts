@@ -3,14 +3,18 @@ import {
   getSelectedText,
   getFrontmostApplication,
 } from "@raycast/api";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import os from "os";
 import { getGitInfo } from "./project-discovery";
+import { getMostRecentGitWorkspace } from "./vscode-storage";
 
-const execPromise = promisify(exec);
+const execFilePromise = promisify(execFile);
+
+// Known editor process names for AppleScript interactions (whitelist for security)
+const KNOWN_EDITORS = ["Code", "Cursor", "Code - Insiders", "VSCodium"];
 
 export interface CapturedContext {
   selectedText?: string;
@@ -53,16 +57,14 @@ async function detectVSCodeProject(): Promise<{
   projectPath?: string;
   currentFile?: string;
 }> {
-  // Editors to check (in order of preference)
-  const editors = ["Cursor", "Code", "Code - Insiders", "VSCodium"];
-
-  // Try to get window title from each editor via AppleScript
-  for (const editorProcess of editors) {
+  // Try to get window title from each known editor via AppleScript
+  // Only use whitelisted editors for security
+  for (const editorProcess of KNOWN_EDITORS) {
     try {
-      const { stdout } = await execPromise(
-        `osascript -e 'tell application "System Events" to tell process "${editorProcess}" to get name of front window' 2>/dev/null`,
-        { timeout: 2000 },
-      );
+      const script = `tell application "System Events" to tell process "${editorProcess}" to get name of front window`;
+      const { stdout } = await execFilePromise("osascript", ["-e", script], {
+        timeout: 2000,
+      });
 
       const windowTitle = stdout.trim();
       if (windowTitle) {
@@ -117,71 +119,10 @@ function parseVSCodeWindowTitle(windowTitle: string): {
 
 /**
  * Get the most recent VS Code workspace from storage
+ * Uses shared utility to avoid code duplication
  */
 async function getVSCodeRecentWorkspace(): Promise<string | undefined> {
-  // VS Code stores recent workspaces in globalStorage
-  const storagePaths = [
-    path.join(
-      os.homedir(),
-      "Library/Application Support/Code/User/globalStorage/storage.json",
-    ),
-    path.join(
-      os.homedir(),
-      "Library/Application Support/Cursor/User/globalStorage/storage.json",
-    ),
-  ];
-
-  for (const storagePath of storagePaths) {
-    try {
-      const data = await fs.promises.readFile(storagePath, "utf-8");
-      const storage = JSON.parse(data);
-
-      // Method 1: Check backupWorkspaces.folders (most reliable for current folder)
-      const backupFolders = storage.backupWorkspaces?.folders || [];
-      for (const folder of backupFolders) {
-        const folderUri = folder.folderUri;
-        if (folderUri) {
-          const cleanPath = folderUri.startsWith("file://")
-            ? decodeURIComponent(folderUri.replace("file://", ""))
-            : folderUri;
-          try {
-            await fs.promises.access(cleanPath);
-            await fs.promises.access(path.join(cleanPath, ".git"));
-            return cleanPath;
-          } catch {
-            // Not a git repo or doesn't exist, continue
-          }
-        }
-      }
-
-      // Method 2: Check recent menu items
-      const fileMenu = storage.lastKnownMenubarData?.menus?.File;
-      if (fileMenu?.items) {
-        const recentMenu = fileMenu.items.find(
-          (item: { id?: string }) =>
-            item.id === "submenuitem.MenubarRecentMenu",
-        );
-        if (recentMenu?.submenu?.items) {
-          for (const item of recentMenu.submenu.items) {
-            if (item.id === "openRecentFolder" && item.uri?.path) {
-              const folderPath = item.uri.path;
-              try {
-                await fs.promises.access(folderPath);
-                await fs.promises.access(path.join(folderPath, ".git"));
-                return folderPath;
-              } catch {
-                // Not a git repo or doesn't exist, continue
-              }
-            }
-          }
-        }
-      }
-    } catch {
-      // Storage file doesn't exist or can't be parsed, try next
-    }
-  }
-
-  return undefined;
+  return getMostRecentGitWorkspace();
 }
 
 /**
@@ -223,13 +164,20 @@ async function findProjectPath(
     for (const dir of dirs) {
       // Decode the path and check if it ends with the project name
       const decodedPath = "/" + dir.slice(1).replace(/-/g, "/");
+
+      // Security: Validate that decoded path is absolute and doesn't contain traversal
+      const normalizedPath = path.normalize(decodedPath);
+      if (!path.isAbsolute(normalizedPath) || normalizedPath.includes("..")) {
+        continue; // Skip suspicious paths
+      }
+
       if (
         decodedPath.endsWith(`/${projectName}`) ||
         path.basename(decodedPath) === projectName
       ) {
         try {
-          await fs.promises.access(decodedPath);
-          return decodedPath;
+          await fs.promises.access(normalizedPath);
+          return normalizedPath;
         } catch {
           // Path doesn't exist on disk anymore
         }

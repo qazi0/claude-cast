@@ -148,7 +148,10 @@ async function parseSessionMetadataFast(
           result.model = entry.model;
         }
       } catch {
-        // Skip invalid lines
+        // Log parse failures for debugging but continue processing
+        console.warn(
+          `Failed to parse metadata line in ${filePath}: ${line.substring(0, 100)}...`,
+        );
       }
 
       // Read enough lines for metadata
@@ -195,105 +198,121 @@ export async function getSessionDetail(
 }
 
 /**
- * Parse a full session file
+ * Parse a full session file using streaming to handle large files
  */
 async function parseFullSession(
   filePath: string,
   encodedProjectPath: string,
 ): Promise<SessionDetail> {
-  const content = await fs.promises.readFile(filePath, "utf8");
-  const lines = content.split("\n").filter(Boolean);
+  return new Promise((resolve, reject) => {
+    const messages: SessionMessage[] = [];
+    let summary = "";
+    let id = path.basename(filePath, ".jsonl");
+    let totalCost = 0;
+    let model: string | undefined;
+    let firstMessage = "";
 
-  const messages: SessionMessage[] = [];
-  let summary = "";
-  let id = path.basename(filePath, ".jsonl");
-  let totalCost = 0;
-  let model: string | undefined;
-  let firstMessage = "";
+    const stream = fs.createReadStream(filePath, { encoding: "utf8" });
+    const rl = readline.createInterface({ input: stream });
 
-  for (const line of lines) {
-    try {
-      const entry: JSONLEntry = JSON.parse(line);
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
 
-      if (entry.type === "summary") {
-        summary = entry.summary || "";
-        id = entry.leafUuid || id;
-      }
+      try {
+        const entry: JSONLEntry = JSON.parse(line);
 
-      if (entry.type === "user" || entry.type === "human") {
-        let content = "";
-        if (typeof entry.message?.content === "string") {
-          content = entry.message.content;
-        } else if (Array.isArray(entry.message?.content)) {
-          content = entry.message.content
-            .filter((b) => b.type === "text")
-            .map((b) => b.text)
-            .join("\n");
+        if (entry.type === "summary") {
+          summary = entry.summary || "";
+          id = entry.leafUuid || id;
         }
 
-        if (!firstMessage) {
-          firstMessage = content.slice(0, 200);
+        if (entry.type === "user" || entry.type === "human") {
+          let content = "";
+          if (typeof entry.message?.content === "string") {
+            content = entry.message.content;
+          } else if (Array.isArray(entry.message?.content)) {
+            content = entry.message.content
+              .filter((b) => b.type === "text")
+              .map((b) => b.text)
+              .join("\n");
+          }
+
+          if (!firstMessage) {
+            firstMessage = content.slice(0, 200);
+          }
+
+          messages.push({
+            type: "user",
+            content,
+            timestamp: entry.timestamp ? new Date(entry.timestamp) : undefined,
+          });
         }
 
-        messages.push({
-          type: "user",
-          content,
-          timestamp: entry.timestamp ? new Date(entry.timestamp) : undefined,
-        });
-      }
+        if (entry.type === "assistant") {
+          let content = "";
+          let hasToolUse = false;
 
-      if (entry.type === "assistant") {
-        let content = "";
-        let hasToolUse = false;
-
-        if (typeof entry.message?.content === "string") {
-          content = entry.message.content;
-        } else if (Array.isArray(entry.message?.content)) {
-          for (const block of entry.message.content) {
-            if (block.type === "text") {
-              content += block.text || "";
-            } else if (block.type === "tool_use") {
-              hasToolUse = true;
+          if (typeof entry.message?.content === "string") {
+            content = entry.message.content;
+          } else if (Array.isArray(entry.message?.content)) {
+            for (const block of entry.message.content) {
+              if (block.type === "text") {
+                content += block.text || "";
+              } else if (block.type === "tool_use") {
+                hasToolUse = true;
+              }
             }
           }
+
+          messages.push({
+            type: "assistant",
+            content,
+            timestamp: entry.timestamp ? new Date(entry.timestamp) : undefined,
+            toolUse: hasToolUse,
+          });
         }
 
-        messages.push({
-          type: "assistant",
-          content,
-          timestamp: entry.timestamp ? new Date(entry.timestamp) : undefined,
-          toolUse: hasToolUse,
+        if (entry.costUSD) {
+          totalCost += entry.costUSD;
+        }
+
+        if (entry.model) {
+          model = entry.model;
+        }
+      } catch (e) {
+        // Log parse failures for debugging but continue processing
+        console.warn(
+          `Failed to parse session line in ${filePath}: ${line.substring(0, 100)}...`,
+        );
+      }
+    });
+
+    rl.on("close", async () => {
+      try {
+        const stat = await fs.promises.stat(filePath);
+        const projectPath = decodeProjectPath(encodedProjectPath);
+
+        resolve({
+          id,
+          filePath,
+          projectPath,
+          projectName: getProjectName(projectPath),
+          summary,
+          firstMessage,
+          lastModified: stat.mtime,
+          turnCount: messages.length,
+          cost: totalCost,
+          model,
+          messages,
         });
+      } catch (err) {
+        reject(err);
       }
+    });
 
-      if (entry.costUSD) {
-        totalCost += entry.costUSD;
-      }
-
-      if (entry.model) {
-        model = entry.model;
-      }
-    } catch {
-      // Skip invalid lines
-    }
-  }
-
-  const stat = await fs.promises.stat(filePath);
-  const projectPath = decodeProjectPath(encodedProjectPath);
-
-  return {
-    id,
-    filePath,
-    projectPath,
-    projectName: getProjectName(projectPath),
-    summary,
-    firstMessage,
-    lastModified: stat.mtime,
-    turnCount: messages.length,
-    cost: totalCost,
-    model,
-    messages,
-  };
+    rl.on("error", reject);
+    stream.on("error", reject);
+  });
 }
 
 /**

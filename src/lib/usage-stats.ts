@@ -96,6 +96,14 @@ export async function getAllTimeStats(): Promise<UsageStats> {
 }
 
 /**
+ * Invalidate the stats cache
+ * Call this after creating/deleting sessions to ensure fresh data
+ */
+export async function invalidateStatsCache(): Promise<void> {
+  await LocalStorage.removeItem(STATS_CACHE_KEY);
+}
+
+/**
  * Get daily stats for the last N days
  */
 export async function getDailyStats(days: number = 7): Promise<DailyStats[]> {
@@ -129,20 +137,30 @@ export async function getDailyStats(days: number = 7): Promise<DailyStats[]> {
 
 /**
  * Calculate stats from a list of sessions
+ * Uses integer cents internally to avoid floating point precision errors
  */
 function calculateStats(sessions: SessionMetadata[]): UsageStats {
-  let totalCost = 0;
+  let totalCostCents = 0;
   const sessionsByProject: Record<string, { count: number; cost: number }> = {};
+  const projectCostCents: Record<string, number> = {};
 
   for (const session of sessions) {
-    totalCost += session.cost || 0;
+    // Convert to cents (integer) to avoid floating point errors
+    const costCents = Math.round((session.cost || 0) * 10000);
+    totalCostCents += costCents;
 
     // Group by project
     if (!sessionsByProject[session.projectName]) {
       sessionsByProject[session.projectName] = { count: 0, cost: 0 };
+      projectCostCents[session.projectName] = 0;
     }
     sessionsByProject[session.projectName].count++;
-    sessionsByProject[session.projectName].cost += session.cost || 0;
+    projectCostCents[session.projectName] += costCents;
+  }
+
+  // Convert project costs back to dollars
+  for (const projectName of Object.keys(sessionsByProject)) {
+    sessionsByProject[projectName].cost = projectCostCents[projectName] / 10000;
   }
 
   // Sort sessions by cost to get top expensive ones
@@ -153,7 +171,7 @@ function calculateStats(sessions: SessionMetadata[]): UsageStats {
 
   return {
     totalSessions: sessions.length,
-    totalCost,
+    totalCost: totalCostCents / 10000, // Convert back to dollars
     sessionsByProject,
     topSessions,
   };

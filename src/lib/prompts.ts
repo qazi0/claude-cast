@@ -1,4 +1,5 @@
 import { LocalStorage, Icon, Color } from "@raycast/api";
+import { randomUUID } from "crypto";
 
 export type PromptCategory =
   | "planning"
@@ -2153,7 +2154,7 @@ export async function saveCustomPrompt(
   const customs = await getCustomPrompts();
   const newPrompt: PromptTemplate = {
     ...prompt,
-    id: `custom-${Date.now()}`,
+    id: `custom-${randomUUID()}`,
     isBuiltIn: false,
   };
   customs.push(newPrompt);

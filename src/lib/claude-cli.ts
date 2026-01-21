@@ -105,11 +105,14 @@ export async function executePrompt(
   }
 
   // Build command args
+  // Use stream-json with verbose to capture all assistant messages
+  // Plain json format returns empty result for agentic/tool-using prompts
   const args: string[] = [
     "-p",
     fullPrompt,
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--model",
     model,
   ];
@@ -163,41 +166,69 @@ export async function executePrompt(
       try {
         // Parse the JSON output - may have multiple JSON lines (streaming format)
         const lines = stdout.trim().split("\n").filter(Boolean);
-        let result = "";
+        let accumulatedContent = ""; // Content from assistant messages
+        let resultFieldContent = ""; // Content from result.result field
         let sessionId: string | undefined;
         let totalCost: number | undefined;
         let usage: { input_tokens: number; output_tokens: number } | undefined;
+        let parsedAnyJson = false;
 
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line);
+            parsedAnyJson = true;
+
             if (parsed.type === "result") {
-              result = parsed.result || "";
+              // Get metadata from result line
               sessionId = parsed.session_id;
               totalCost = parsed.total_cost_usd;
               usage = parsed.usage;
+              // Only use result field if it has content
+              if (parsed.result) {
+                resultFieldContent = parsed.result;
+              }
             } else if (parsed.type === "assistant" && parsed.message?.content) {
-              // Handle streamed content
+              // Handle assistant message content blocks
               for (const block of parsed.message.content) {
                 if (block.type === "text") {
-                  result += block.text;
+                  accumulatedContent += block.text;
                 }
               }
             } else if (parsed.result) {
-              // Direct result format
-              result = parsed.result;
+              // Direct result format (non-type response)
+              resultFieldContent = parsed.result;
               sessionId = parsed.session_id;
               totalCost = parsed.total_cost_usd;
               usage = parsed.usage;
             }
           } catch {
             // Not valid JSON, might be plain text
-            result += line;
+            accumulatedContent += line;
           }
         }
 
+        // Prefer accumulated content from assistant messages,
+        // fall back to result field
+        let finalResult = accumulatedContent || resultFieldContent;
+
+        // If we parsed JSON but have no content, and there was meaningful output,
+        // this indicates the CLI returned data in an unexpected format
+        if (
+          !finalResult &&
+          parsedAnyJson &&
+          usage?.output_tokens &&
+          usage.output_tokens > 0
+        ) {
+          // The CLI generated output but we couldn't extract it - return the raw JSON
+          // so the user at least sees something (better than empty)
+          finalResult = stdout;
+        } else if (!finalResult && !parsedAnyJson) {
+          // Couldn't parse any JSON, return raw stdout
+          finalResult = stdout;
+        }
+
         resolve({
-          result: result || stdout,
+          result: finalResult || "",
           session_id: sessionId,
           total_cost_usd: totalCost,
           usage,

@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { LocalStorage } from "@raycast/api";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -10,6 +9,7 @@ import {
   getMostRecentSession,
   listProjectSessions,
 } from "./session-parser";
+import { parseVSCodeWorkspaces } from "./vscode-storage";
 
 const execPromise = promisify(exec);
 
@@ -133,59 +133,10 @@ export async function discoverClaudeProjects(): Promise<Project[]> {
 
 /**
  * Discover VS Code recent workspaces
+ * Uses shared utility to avoid code duplication
  */
 export async function discoverVSCodeWorkspaces(): Promise<string[]> {
-  const vscodePaths = [
-    path.join(
-      os.homedir(),
-      "Library/Application Support/Code/User/globalStorage/storage.json",
-    ),
-    path.join(
-      os.homedir(),
-      "Library/Application Support/Code - Insiders/User/globalStorage/storage.json",
-    ),
-    path.join(
-      os.homedir(),
-      "Library/Application Support/Cursor/User/globalStorage/storage.json",
-    ),
-  ];
-
-  const workspaces: string[] = [];
-
-  for (const vscodePath of vscodePaths) {
-    try {
-      const content = await fs.promises.readFile(vscodePath, "utf8");
-      const data = JSON.parse(content);
-
-      // VS Code stores recent workspaces in different places depending on version
-      const recentWorkspaces =
-        data.openedPathsList?.workspaces3 ||
-        data.openedPathsList?.entries ||
-        data.profileAssociations?.workspaces ||
-        [];
-
-      for (const workspace of recentWorkspaces) {
-        if (typeof workspace === "string") {
-          // Handle file:// URIs
-          const wsPath = workspace.startsWith("file://")
-            ? decodeURIComponent(workspace.replace("file://", ""))
-            : workspace;
-          workspaces.push(wsPath);
-        } else if (workspace?.folderUri) {
-          const uri = workspace.folderUri;
-          const wsPath = uri.startsWith("file://")
-            ? decodeURIComponent(uri.replace("file://", ""))
-            : uri;
-          workspaces.push(wsPath);
-        }
-      }
-    } catch {
-      // VS Code storage not found or invalid
-    }
-  }
-
-  // Deduplicate
-  return [...new Set(workspaces)];
+  return parseVSCodeWorkspaces();
 }
 
 /**

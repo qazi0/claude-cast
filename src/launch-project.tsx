@@ -9,7 +9,7 @@ import {
   Form,
   popToRoot,
 } from "@raycast/api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   getAllProjects,
   addFavorite,
@@ -20,34 +20,76 @@ import {
 } from "./lib/project-discovery";
 import { launchClaudeCode, openTerminalWithCommand } from "./lib/terminal";
 
+// Type for batched git info
+type GitInfoMap = Record<
+  string,
+  { branch: string; hasChanges: boolean; remote?: string } | null
+>;
+
 export default function LaunchProject() {
   const [isLoading, setIsLoading] = useState(true);
   const [favorites, setFavorites] = useState<Project[]>([]);
   const [recent, setRecent] = useState<Project[]>([]);
   const [all, setAll] = useState<Project[]>([]);
   const [searchText, setSearchText] = useState("");
+  const [gitInfoMap, setGitInfoMap] = useState<GitInfoMap>({});
 
-  async function loadProjects() {
+  const loadProjects = useCallback(async () => {
     setIsLoading(true);
     const projects = await getAllProjects();
     setFavorites(projects.favorites);
     setRecent(projects.recent);
     setAll(projects.all);
     setIsLoading(false);
-  }
+
+    // Batch load git info for all projects
+    const allProjects = [
+      ...projects.favorites,
+      ...projects.recent,
+      ...projects.all,
+    ];
+    const uniquePaths = [...new Set(allProjects.map((p) => p.path))];
+
+    // Load git info in parallel with error handling
+    const gitInfoEntries = await Promise.all(
+      uniquePaths.map(async (projectPath) => {
+        try {
+          const info = await getGitInfo(projectPath);
+          return [projectPath, info] as const;
+        } catch {
+          return [projectPath, null] as const;
+        }
+      }),
+    );
+
+    setGitInfoMap(Object.fromEntries(gitInfoEntries));
+  }, []);
 
   useEffect(() => {
     loadProjects();
-  }, []);
+  }, [loadProjects]);
 
-  const filteredFavorites = favorites.filter((p) =>
-    p.name.toLowerCase().includes(searchText.toLowerCase()),
+  // Memoize filtered lists to avoid recalculating on every render
+  const filteredFavorites = useMemo(
+    () =>
+      favorites.filter((p) =>
+        p.name.toLowerCase().includes(searchText.toLowerCase()),
+      ),
+    [favorites, searchText],
   );
-  const filteredRecent = recent.filter((p) =>
-    p.name.toLowerCase().includes(searchText.toLowerCase()),
+  const filteredRecent = useMemo(
+    () =>
+      recent.filter((p) =>
+        p.name.toLowerCase().includes(searchText.toLowerCase()),
+      ),
+    [recent, searchText],
   );
-  const filteredAll = all.filter((p) =>
-    p.name.toLowerCase().includes(searchText.toLowerCase()),
+  const filteredAll = useMemo(
+    () =>
+      all.filter((p) =>
+        p.name.toLowerCase().includes(searchText.toLowerCase()),
+      ),
+    [all, searchText],
   );
 
   return (
@@ -65,6 +107,7 @@ export default function LaunchProject() {
             <ProjectItem
               key={project.path}
               project={project}
+              gitInfo={gitInfoMap[project.path]}
               onToggleFavorite={async () => {
                 await removeFavorite(project.path);
                 loadProjects();
@@ -83,6 +126,7 @@ export default function LaunchProject() {
             <ProjectItem
               key={project.path}
               project={project}
+              gitInfo={gitInfoMap[project.path]}
               onToggleFavorite={async () => {
                 await addFavorite(project.path);
                 loadProjects();
@@ -101,6 +145,7 @@ export default function LaunchProject() {
             <ProjectItem
               key={project.path}
               project={project}
+              gitInfo={gitInfoMap[project.path]}
               onToggleFavorite={async () => {
                 await addFavorite(project.path);
                 loadProjects();
@@ -126,21 +171,16 @@ export default function LaunchProject() {
 
 function ProjectItem({
   project,
+  gitInfo,
   onToggleFavorite,
 }: {
   project: Project;
+  gitInfo:
+    | { branch: string; hasChanges: boolean; remote?: string }
+    | null
+    | undefined;
   onToggleFavorite: () => void;
 }) {
-  const [gitInfo, setGitInfo] = useState<{
-    branch: string;
-    hasChanges: boolean;
-    remote?: string;
-  } | null>(null);
-
-  useEffect(() => {
-    getGitInfo(project.path).then(setGitInfo);
-  }, [project.path]);
-
   const accessories: List.Item.Accessory[] = [];
 
   if (project.sessionCount && project.sessionCount > 0) {

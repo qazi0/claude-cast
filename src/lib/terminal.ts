@@ -1,8 +1,8 @@
 import { getPreferenceValues, showToast, Toast, open } from "@raycast/api";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 
-const execPromise = promisify(exec);
+const execFilePromise = promisify(execFile);
 
 type TerminalApp = "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty";
 
@@ -62,7 +62,7 @@ async function openInTerminalApp(command: string, cwd: string): Promise<void> {
     end tell
   `;
 
-  await execPromise(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
+  await execFilePromise("osascript", ["-e", script]);
 }
 
 async function openInITerm(command: string, cwd: string): Promise<void> {
@@ -79,7 +79,7 @@ async function openInITerm(command: string, cwd: string): Promise<void> {
     end tell
   `;
 
-  await execPromise(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
+  await execFilePromise("osascript", ["-e", script]);
 }
 
 async function openInWarp(command: string, cwd: string): Promise<void> {
@@ -89,24 +89,32 @@ async function openInWarp(command: string, cwd: string): Promise<void> {
 }
 
 async function openInKitty(command: string, cwd: string): Promise<void> {
-  // Kitty can be invoked directly
-  await execPromise(
-    `kitty --single-instance --directory="${cwd}" -e sh -c '${command.replace(/'/g, "'\\''")}'`,
-  );
+  // Kitty can be invoked directly via execFile with array arguments
+  await execFilePromise("kitty", [
+    "--single-instance",
+    `--directory=${cwd}`,
+    "-e",
+    "sh",
+    "-c",
+    command,
+  ]);
 }
 
 async function openInGhostty(command: string, cwd: string): Promise<void> {
-  // Ghostty can be invoked through open
   const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, "\\$");
   const escapedCwd = cwd.replace(/"/g, '\\"');
 
-  // Try direct invocation first
+  // Try direct invocation first via execFile with array arguments
   try {
-    await execPromise(
-      `ghostty --working-directory="${escapedCwd}" -e sh -c '${command.replace(/'/g, "'\\''")}'`,
-    );
+    await execFilePromise("ghostty", [
+      `--working-directory=${cwd}`,
+      "-e",
+      "sh",
+      "-c",
+      command,
+    ]);
   } catch {
-    // Fallback to AppleScript
+    // Fallback to AppleScript using execFile with array arguments
     const script = `
       tell application "Ghostty"
         activate
@@ -117,7 +125,7 @@ async function openInGhostty(command: string, cwd: string): Promise<void> {
         keystroke return
       end tell
     `;
-    await execPromise(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
+    await execFilePromise("osascript", ["-e", script]);
   }
 }
 
@@ -173,7 +181,10 @@ export async function getAvailableTerminals(): Promise<TerminalApp[]> {
 
   for (const [appName, terminal] of checks) {
     try {
-      await execPromise(`osascript -e 'id of application "${appName}"'`);
+      await execFilePromise("osascript", [
+        "-e",
+        `id of application "${appName}"`,
+      ]);
       terminals.push(terminal);
     } catch {
       // App not installed
