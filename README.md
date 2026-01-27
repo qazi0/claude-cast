@@ -31,10 +31,10 @@ Find and resume any Claude Code conversation across all projects.
 - Resume, fork, or delete sessions
 - See cost and token usage per session
 
-### Prompt Library
+### Agentic Workflows
 Curated collection of production-tested prompts with variable substitution.
 
-![Prompt Library - Categories](metadata/claudecast-8.png)
+![Agentic Workflows - Categories](metadata/claudecast-8.png)
 
 **Categories:**
 - Planning & Architecture
@@ -45,7 +45,7 @@ Curated collection of production-tested prompts with variable substitution.
 - Documentation
 - Advanced Multi-Step Workflows
 
-![Prompt Library - More Prompts](metadata/claudecast-9.png)
+![Agentic Workflows - More Prompts](metadata/claudecast-9.png)
 
 ### Git Actions
 Git-aware Claude Code workflows for common tasks.
@@ -163,7 +163,7 @@ Set these in Raycast preferences:
 | Browse Sessions | `⌘⌥S` |
 | Launch Project | `⌘⌥L` |
 | Git Actions | `⌘⇧G` |
-| Prompt Library | `⌘⌥P` |
+| Agentic Workflows | `⌘⌥P` |
 | Transform Selection | `⌘⇧T` |
 
 ### Tips
@@ -171,7 +171,7 @@ Set these in Raycast preferences:
 1. **Context Capture**: For best results, select code in VS Code before triggering Ask Claude Code
 2. **Project Detection**: Keep VS Code open in your project for automatic project detection
 3. **Quick Continue**: Use this when you step away and want to resume your last conversation
-4. **Prompt Library**: Start with built-in prompts, then create custom ones for your workflows
+4. **Agentic Workflows**: Start with built-in prompts, then create custom ones for your workflows
 5. **Git Actions**: Stage your changes first, then use "Write Commit Message" for AI-generated commits
 
 ## Development
@@ -203,7 +203,7 @@ claude-cast/
 │   ├── launch-project.tsx      # Project Launcher
 │   ├── quick-continue.tsx      # Quick Continue
 │   ├── git-actions.tsx         # Git Actions
-│   ├── prompt-library.tsx      # Prompt Library
+│   ├── prompt-library.tsx      # Agentic Workflows
 │   ├── transform-selection.tsx # Transform Selection
 │   ├── menu-bar-monitor.tsx    # Menu Bar Monitor
 │   ├── usage-dashboard.tsx     # Usage Dashboard
