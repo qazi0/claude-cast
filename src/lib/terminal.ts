@@ -407,11 +407,161 @@ run_claude_with_watcher() {
 }
 
 log "=============================================="
-log "   Ralph Fresh Context Loop (Stop Token)"
+log "   Ralph Fresh Context Loop"
 log "=============================================="
 log "Stop gracefully: touch ${$}STOP_FILE"
 log "Full TUI visible during Claude sessions!"
 log ""
+
+#######################################
+# Generate resume.sh script for continuing later
+#######################################
+generate_resume_script() {
+    cat > "${$}RALPH_DIR/resume.sh" << 'RESUME_SCRIPT_EOF'
+#!/bin/bash
+# Ralph Loop Resume Script - Continue incomplete tasks
+# Usage: bash .ralph/resume.sh [max-iterations]
+#        Default: 10 iterations
+
+set -e
+
+MAX_ITERATIONS=${$}{1:-10}
+RALPH_DIR=".ralph"
+PLAN_FILE="${$}{RALPH_DIR}/plan.md"
+STOP_FILE="${$}{RALPH_DIR}/stop"
+SIGNAL_FILE="${$}{RALPH_DIR}/signal"
+LOG_FILE="${$}{RALPH_DIR}/loop.log"
+ITERATION=0
+
+# Colors
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+BLUE='\\033[0;34m'
+CYAN='\\033[0;36m'
+NC='\\033[0m'
+
+log() { echo -e "${$}{BLUE}[Ralph]${$}{NC} ${$}1"; echo "[${$}(date '+%Y-%m-%d %H:%M:%S')] ${$}1" >> "${$}LOG_FILE"; }
+log_success() { echo -e "${$}{GREEN}[Ralph]${$}{NC} ${$}1"; echo "[${$}(date '+%Y-%m-%d %H:%M:%S')] SUCCESS: ${$}1" >> "${$}LOG_FILE"; }
+log_warning() { echo -e "${$}{YELLOW}[Ralph]${$}{NC} ${$}1"; echo "[${$}(date '+%Y-%m-%d %H:%M:%S')] WARNING: ${$}1" >> "${$}LOG_FILE"; }
+log_phase() { echo -e "${$}{CYAN}[Ralph]${$}{NC} ${$}1"; echo "[${$}(date '+%Y-%m-%d %H:%M:%S')] PHASE: ${$}1" >> "${$}LOG_FILE"; }
+
+has_remaining_tasks() { grep -q '^- \\[ \\]' "${$}PLAN_FILE" 2>/dev/null; }
+count_tasks() {
+    local completed remaining total
+    completed=${$}(grep -c '^- \\[x\\]' "${$}PLAN_FILE" 2>/dev/null || echo 0)
+    remaining=${$}(grep -c '^- \\[ \\]' "${$}PLAN_FILE" 2>/dev/null || echo 0)
+    total=${$}((completed + remaining))
+    echo "${$}completed/${$}total"
+}
+get_next_task() { grep -m1 '^- \\[ \\]' "${$}PLAN_FILE" 2>/dev/null | sed 's/^- \\[ \\] //'; }
+
+STOP_TOKEN="###RALPH_TASK_COMPLETE###"
+
+run_claude_with_watcher() {
+    local PROMPT_FILE="${$}1"
+    local WATCHER_PID="" CLAUDE_PID=""
+    rm -f "${$}SIGNAL_FILE"
+    cat "${$}PROMPT_FILE" | claude --dangerously-skip-permissions &
+    CLAUDE_PID=${$}!
+    (
+        while true; do
+            if [[ -f "${$}SIGNAL_FILE" ]] && grep -q "${$}STOP_TOKEN" "${$}SIGNAL_FILE" 2>/dev/null; then
+                sleep 2; kill -9 ${$}CLAUDE_PID 2>/dev/null || true; exit 0
+            fi
+            if ! kill -0 ${$}CLAUDE_PID 2>/dev/null; then exit 0; fi
+            sleep 1
+        done
+    ) &
+    WATCHER_PID=${$}!
+    wait ${$}CLAUDE_PID 2>/dev/null || true
+    kill ${$}WATCHER_PID 2>/dev/null || true; wait ${$}WATCHER_PID 2>/dev/null || true
+    if [[ -f "${$}SIGNAL_FILE" ]] && grep -q "${$}STOP_TOKEN" "${$}SIGNAL_FILE" 2>/dev/null; then
+        rm -f "${$}SIGNAL_FILE"; return 0
+    else
+        rm -f "${$}SIGNAL_FILE"; return 1
+    fi
+}
+
+# Check prerequisites
+if [[ ! -f "${$}PLAN_FILE" ]]; then
+    echo -e "${$}{RED}[Ralph]${$}{NC} No plan.md found. Run Ralph Loop from Raycast first to create a plan."
+    exit 1
+fi
+
+if ! has_remaining_tasks; then
+    log_success "All tasks already completed! (${$}(count_tasks))"
+    exit 0
+fi
+
+log "=============================================="
+log "   Ralph Loop - Resuming"
+log "=============================================="
+log "Max iterations: ${$}MAX_ITERATIONS"
+log "Progress: ${$}(count_tasks)"
+log "Stop gracefully: touch ${$}STOP_FILE"
+echo ""
+
+while [ ${$}ITERATION -lt ${$}MAX_ITERATIONS ]; do
+    ITERATION=${$}((ITERATION + 1))
+    if [ -f "${$}STOP_FILE" ]; then log_warning "Stop file detected."; rm -f "${$}STOP_FILE"; exit 0; fi
+    if ! has_remaining_tasks; then
+        echo ""; log_success "=============================================="; log_success "   ALL TASKS COMPLETED! (${$}(count_tasks))"; log_success "=============================================="
+        exit 0
+    fi
+    NEXT_TASK=${$}(get_next_task)
+    log "=== Iteration ${$}ITERATION/${$}MAX_ITERATIONS (Progress: ${$}(count_tasks)) ==="
+    log "Next task: ${$}NEXT_TASK"
+    echo ""
+
+    EXEC_PROMPT_FILE="${$}(mktemp)"
+    cat > "${$}EXEC_PROMPT_FILE" << EXEC_EOF
+You are an autonomous coding agent in a Ralph Loop - a workflow where EACH TASK runs in a FRESH CONTEXT.
+
+=== CRITICAL: YOU HAVE NO MEMORY OF PREVIOUS SESSIONS ===
+All prior work is saved in FILES. You must READ files to understand the current state.
+
+=== YOUR CURRENT TASK ===
+${$}NEXT_TASK
+
+=== EXECUTION PROTOCOL ===
+STEP 1: ORIENT - Read .ralph/plan.md, Architecture Notes, Technical Context, and existing source files
+STEP 2: EXECUTE - Complete the task, follow existing patterns, meet acceptance criteria
+STEP 3: VERIFY - Ensure task is FULLY complete
+STEP 4: UPDATE - Mark task [x] in plan.md, add to Progress Log and Technical Context
+STEP 5: SIGNAL - Run: echo "###RALPH_TASK_COMPLETE###" > .ralph/signal
+
+=== RULES ===
+1. Complete ONE task only
+2. Do not ask questions - make reasonable decisions
+3. When done, signal completion - don't ask 'anything else?'
+
+Begin by reading .ralph/plan.md.
+EXEC_EOF
+
+    if run_claude_with_watcher "${$}EXEC_PROMPT_FILE"; then
+        log_success "Task completed"
+    else
+        log_warning "Task session ended"
+    fi
+    rm -f "${$}EXEC_PROMPT_FILE"
+    sleep 2; echo ""
+done
+
+log_warning "Max iterations (${$}MAX_ITERATIONS) reached"
+if has_remaining_tasks; then
+    REMAINING=${$}(grep -c '^- \\[ \\]' "${$}PLAN_FILE" 2>/dev/null || echo 0)
+    log_warning "${$}REMAINING tasks remain."
+    echo ""; echo -e "  ${$}{GREEN}bash .ralph/resume.sh 10${$}{NC}  # to continue"
+    exit 1
+fi
+log_success "All tasks completed!"
+RESUME_SCRIPT_EOF
+    chmod +x "${$}RALPH_DIR/resume.sh"
+}
+
+# Generate resume script at startup
+generate_resume_script
 
 #######################################
 # PHASE 1: PLANNING
@@ -715,7 +865,15 @@ log_warning "Max iterations (${$}MAX_ITERATIONS) reached"
 if has_remaining_tasks; then
     REMAINING=${$}(grep -c '^- \\[ \\]' "${$}PLAN_FILE" 2>/dev/null || echo 0)
     log_warning "${$}REMAINING tasks remain incomplete."
-    log "Run again to continue, or increase max iterations."
+    echo ""
+    log "To resume, run one of these commands:"
+    echo ""
+    echo -e "  ${$}{CYAN}# Resume with 10 more iterations:${$}{NC}"
+    echo -e "  ${$}{GREEN}cd ${$}(pwd) && bash .ralph/resume.sh 10${$}{NC}"
+    echo ""
+    echo -e "  ${$}{CYAN}# Or specify a different number:${$}{NC}"
+    echo -e "  ${$}{GREEN}cd ${$}(pwd) && bash .ralph/resume.sh <iterations>${$}{NC}"
+    echo ""
     exit 1
 else
     log_success "All tasks completed!"
