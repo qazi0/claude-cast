@@ -9,6 +9,8 @@
   A comprehensive Raycast extension that bridges Claude Code's powerful agentic CLI with Raycast's instant-access UI.
 </p>
 
+![ClaudeCast Main Menu](metadata/claudecast-10.png)
+
 ---
 
 ## Features
@@ -46,6 +48,24 @@ Curated collection of production-tested prompts with variable substitution.
 - Advanced Multi-Step Workflows
 
 ![Agentic Workflows - More Prompts](metadata/claudecast-9.png)
+
+### Ralph Loop
+Autonomous agentic execution that breaks down complex tasks and runs them with fresh context per iteration.
+
+![Ralph Loop](metadata/claudecast-1.png)
+
+**How it works:**
+1. Describe your task and requirements
+2. Claude creates a plan with atomic, self-contained tasks
+3. Each task runs in a fresh Claude session (~176K tokens available)
+4. Watch Claude work with full TUI visibility
+5. Resume anytime if max iterations reached
+
+**Features:**
+- Fresh context per task prevents degradation at high token counts
+- Full terminal UI visibility during execution
+- Graceful stop with `touch .ralph/stop`
+- Resume with `bash .ralph/resume.sh 10`
 
 ### Git Actions
 Git-aware Claude Code workflows for common tasks.
