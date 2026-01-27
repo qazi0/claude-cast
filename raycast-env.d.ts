@@ -14,7 +14,9 @@ type ExtensionPreferences = {
   "terminalApp": "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty",
   /** Claude Code Path - Path to the claude CLI binary (leave empty for auto-detection) */
   "claudeCodePath"?: string,
-  /** OAuth Token - Long-lived OAuth token from 'claude setup-token' (required for Raycast integration) */
+  /** Anthropic API Key - Your Anthropic API key for pay-as-you-go billing (console.anthropic.com). Use this OR OAuth Token. */
+  "anthropicApiKey"?: string,
+  /** OAuth Token (Claude Subscription) - For Claude Pro/Team subscribers: Run 'claude setup-token' in terminal and paste the token here. */
   "oauthToken"?: string
 }
 
