@@ -474,13 +474,31 @@ function PromptVariablesForm({
           });
           return;
         }
-        await launchRalphFreshLoop({
-          projectPath: targetPath,
-          task: processedValues.task || "",
-          requirements: processedValues.requirements || "",
-          maxIterations: parseInt(processedValues.maxIterations || "20", 10),
+
+        // Show animated loading toast while preparing Ralph Loop
+        const loadingToast = await showToast({
+          style: Toast.Style.Animated,
+          title: "Preparing Ralph Loop...",
+          message: "Please wait for terminal to launch",
         });
-        await popToRoot();
+
+        try {
+          await launchRalphFreshLoop({
+            projectPath: targetPath,
+            task: processedValues.task || "",
+            requirements: processedValues.requirements || "",
+            maxIterations: parseInt(processedValues.maxIterations || "20", 10),
+          });
+          loadingToast.style = Toast.Style.Success;
+          loadingToast.title = "Ralph Loop launched";
+          loadingToast.message = undefined;
+          await popToRoot();
+        } catch (error) {
+          loadingToast.style = Toast.Style.Failure;
+          loadingToast.title = "Failed to launch Ralph Loop";
+          loadingToast.message =
+            error instanceof Error ? error.message : String(error);
+        }
         return;
       }
 
