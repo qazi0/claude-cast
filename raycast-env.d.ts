@@ -41,7 +41,10 @@ declare namespace Preferences {
   /** Preferences accessible in the `transform-selection` command */
   export type TransformSelection = ExtensionPreferences & {}
   /** Preferences accessible in the `menu-bar-monitor` command */
-  export type MenuBarMonitor = ExtensionPreferences & {}
+  export type MenuBarMonitor = ExtensionPreferences & {
+  /** undefined - Display today's cost next to the menu bar icon */
+  "showCostInMenuBar": boolean
+}
   /** Preferences accessible in the `usage-dashboard` command */
   export type UsageDashboard = ExtensionPreferences & {}
 }
