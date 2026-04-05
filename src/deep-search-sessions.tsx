@@ -11,10 +11,10 @@ import {
   confirmAlert,
   popToRoot,
 } from "@raycast/api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { existsSync } from "fs";
 import {
-  listAllSessions,
+  searchSessionContent,
   getSessionDetail,
   deleteSession,
   SessionMetadata,
@@ -23,95 +23,123 @@ import {
 import { launchClaudeCode } from "./lib/terminal";
 import { ensureClaudeInstalled } from "./lib/claude-cli";
 
-export default function BrowseSessions() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [sessions, setSessions] = useState<SessionMetadata[]>([]);
-  const [filterProject, setFilterProject] = useState<string | null>(null);
+const MIN_QUERY_LENGTH = 3;
+const DEBOUNCE_MS = 300;
 
-  async function loadSessions() {
-    setIsLoading(true);
-    const allSessions = await listAllSessions({ limit: 200 });
-    // Deduplicate sessions by ID (same session can exist across multiple project directories)
-    // Keep the most recent one when duplicates exist
-    const seenIds = new Map<string, SessionMetadata>();
-    for (const session of allSessions) {
-      const existing = seenIds.get(session.id);
-      if (!existing || session.lastModified > existing.lastModified) {
-        seenIds.set(session.id, session);
-      }
-    }
-    setSessions(Array.from(seenIds.values()));
-    setIsLoading(false);
+function getEmptyDescription(searchText: string, isSearching: boolean): string {
+  if (searchText.length === 0)
+    return "Type at least 3 characters to search session content";
+  if (searchText.length < MIN_QUERY_LENGTH) {
+    const remaining = MIN_QUERY_LENGTH - searchText.length;
+    return `Type ${remaining} more character${remaining === 1 ? "" : "s"} to start searching`;
   }
+  if (isSearching) return "Searching session content...";
+  return `No sessions matched "${searchText}"`;
+}
 
+export default function DeepSearchSessions() {
+  const [isSearching, setIsSearching] = useState(false);
+  const [results, setResults] = useState<SessionMetadata[]>([]);
+  const [searchText, setSearchText] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup debounce timer and abort in-flight search on unmount
   useEffect(() => {
-    loadSessions();
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortRef.current?.abort();
+    };
   }, []);
 
-  // Get unique projects for filter dropdown
-  const projects = [...new Set(sessions.map((s) => s.projectName))].sort();
+  const performSearch = useCallback(async (query: string) => {
+    // Cancel any in-flight search
+    abortRef.current?.abort();
 
-  const filteredSessions = filterProject
-    ? sessions.filter((s) => s.projectName === filterProject)
-    : sessions;
+    if (query.length < MIN_QUERY_LENGTH) {
+      setResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsSearching(true);
+    setResults([]);
+
+    const seenIds = new Set<string>();
+
+    try {
+      await searchSessionContent(
+        query,
+        (session) => {
+          if (controller.signal.aborted) return;
+          // Deduplicate by session ID
+          if (seenIds.has(session.id)) return;
+          seenIds.add(session.id);
+          setResults((prev) => [...prev, session]);
+        },
+        controller.signal,
+      );
+    } catch (error: unknown) {
+      if (controller.signal.aborted) return; // Expected cancellation
+      console.error("Deep search failed:", error);
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Search failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred",
+      });
+    }
+
+    if (!controller.signal.aborted) {
+      setIsSearching(false);
+    }
+  }, []);
+
+  const onSearchTextChange = useCallback(
+    (text: string) => {
+      setSearchText(text);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => performSearch(text), DEBOUNCE_MS);
+    },
+    [performSearch],
+  );
+
+  const emptyDescription = getEmptyDescription(searchText, isSearching);
 
   return (
     <List
-      isLoading={isLoading}
-      searchBarPlaceholder="Search sessions..."
-      searchBarAccessory={
-        <List.Dropdown
-          tooltip="Filter by Project"
-          onChange={(value) => setFilterProject(value === "all" ? null : value)}
-        >
-          <List.Dropdown.Item title="All Projects" value="all" />
-          <List.Dropdown.Section title="Projects">
-            {projects.map((project) => (
-              <List.Dropdown.Item
-                key={project}
-                title={project}
-                value={project}
-              />
-            ))}
-          </List.Dropdown.Section>
-        </List.Dropdown>
-      }
+      isLoading={isSearching}
+      searchBarPlaceholder="Search all session content..."
+      filtering={false}
+      onSearchTextChange={onSearchTextChange}
+      throttle
     >
-      {filteredSessions.map((session) => (
-        <SessionItem
+      {results.map((session) => (
+        <SearchResultItem
           key={session.id}
           session={session}
-          onDelete={async () => {
-            try {
-              await deleteSession(session.id);
-              loadSessions();
-            } catch (error) {
-              await showToast({
-                style: Toast.Style.Failure,
-                title: "Failed to delete session",
-                message: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }}
+          onDelete={() =>
+            setResults((prev) => prev.filter((s) => s.id !== session.id))
+          }
         />
       ))}
 
-      {!isLoading && filteredSessions.length === 0 && (
+      {results.length === 0 && (
         <List.EmptyView
-          title="No Sessions Found"
-          description={
-            filterProject
-              ? `No sessions found for ${filterProject}`
-              : "Run Claude Code to create your first session"
-          }
-          icon={Icon.Message}
+          title={isSearching ? "Searching..." : "Deep Search Sessions"}
+          description={emptyDescription}
+          icon={isSearching ? Icon.MagnifyingGlass : Icon.Message}
         />
       )}
     </List>
   );
 }
 
-function SessionItem({
+function SearchResultItem({
   session,
   onDelete,
 }: {
@@ -198,8 +226,20 @@ function SessionItem({
         style: Toast.Style.Animated,
         title: "Deleting session...",
       });
-      onDelete();
-      await showToast({ style: Toast.Style.Success, title: "Session deleted" });
+      try {
+        await deleteSession(session.id);
+        onDelete();
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Session deleted",
+        });
+      } catch (error) {
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Failed to delete session",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -275,12 +315,16 @@ function SessionDetailView({
   const [session, setSession] = useState<SessionDetail | null>(null);
 
   useEffect(() => {
-    async function loadDetail() {
-      const detail = await getSessionDetail(sessionId);
-      setSession(detail);
-      setIsLoading(false);
-    }
-    loadDetail();
+    (async () => {
+      try {
+        const detail = await getSessionDetail(sessionId);
+        setSession(detail);
+      } catch (err) {
+        console.error("Failed to load session detail:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
   }, [sessionId]);
 
   if (isLoading) {

@@ -1,6 +1,22 @@
 # ClaudeCast Changelog
 
-## [1.1.0] - {PR_MERGE_DATE}
+## [1.2.0] - 2026-02-20
+
+### Added
+
+- **Deep Search Sessions**: New command that searches through full session content across all Claude Code conversations
+  - Streams through JSONL files incrementally, showing results as they're found
+  - Debounced search with AbortSignal cancellation when query changes
+  - Searches all message content (user and assistant) case-insensitively
+
+### Fixed
+
+- **Project Path Resolution**: Fixed "Project path no longer exists" error when browsing sessions
+  - Claude Code encodes both `/` and `.` as `-` in directory names, making the previous naive decode incorrect for usernames with dots or project names with dashes
+  - Added three-tier resolution: sessions-index.json (authoritative), filesystem-guided walk, naive decode (fallback)
+  - Fixed `encodeProjectPath` to correctly encode both `/` and `.`
+
+## [1.1.0] - 2026-01-27
 
 ### Added
 
@@ -34,7 +50,7 @@
 - **Task Input Fields**: Ralph Loop task and requirements fields now use multiline TextArea for easier editing
 - **Loading States**: Added animated toast "Preparing Ralph Loop..." while script generates
 
-## [1.0.0] - {PR_MERGE_DATE}
+## [Initial Release] - 2026-01-23
 
 ### Added
 
@@ -43,7 +59,8 @@
 - **Session Browser**: Find and resume Claude Code conversations
 - **Quick Continue**: One-keystroke session continuation
 - **Git Actions**: Review staged changes, write commit messages
-- **Agentic Workflows**: 18 curated agentic workflow prompts with support for repository path input
+- **Prompt Library**: 17 curated agentic workflow prompts with support for repository path input
 - **Transform Selection**: Code transformations from any app
 - **Menu Bar Monitor**: Real-time Claude Code status and quick access
 - **Usage Dashboard**: Cost and usage metrics tracking
+
