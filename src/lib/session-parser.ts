@@ -15,6 +15,7 @@ export interface SessionMetadata {
   turnCount: number;
   cost: number;
   model?: string;
+  matchSnippet?: string;
 }
 
 export interface SessionMessage {
@@ -66,6 +67,43 @@ export function safeTruncate(str: string, maxLen: number, suffix = ""): string {
     end--;
   }
   return str.slice(0, end) + suffix;
+}
+
+/**
+ * Extract a short contextual snippet around the first occurrence of a query.
+ * Normalizes whitespace so multiline session content produces clean subtitles.
+ */
+function extractSnippet(text: string, query: string, contextWords = 15): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const lower = normalized.toLowerCase();
+  const idx = lower.indexOf(query.toLowerCase());
+  if (idx === -1) return "";
+
+  let start = idx;
+  let wordsFound = 0;
+  while (start > 0 && wordsFound < contextWords) {
+    start--;
+    if (normalized[start] === " ") wordsFound++;
+  }
+  if (start > 0) start++;
+
+  let end = idx + query.length;
+  wordsFound = 0;
+  while (end < normalized.length && wordsFound < contextWords) {
+    if (normalized[end] === " ") wordsFound++;
+    end++;
+  }
+
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < normalized.length ? "..." : "";
+
+  // Build snippet with the matched portion wrapped in **bold** for highlighting
+  const before = normalized.slice(start, idx);
+  const match = normalized.slice(idx, idx + query.length);
+  const after = normalized.slice(idx + query.length, end);
+  const snippet =
+    prefix + before + "**" + match + "**" + after.trimEnd() + suffix;
+  return safeTruncate(snippet, 300);
 }
 
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
@@ -719,6 +757,7 @@ export async function searchSessionContent(
         turnCount: match.turnCount,
         cost: match.cost,
         model: match.model,
+        matchSnippet: match.matchSnippet,
       });
     }
   }
@@ -741,6 +780,7 @@ async function searchSingleSession(
   turnCount: number;
   cost: number;
   model?: string;
+  matchSnippet?: string;
 } | null> {
   type MatchResult = {
     id: string;
@@ -749,10 +789,12 @@ async function searchSingleSession(
     turnCount: number;
     cost: number;
     model?: string;
+    matchSnippet?: string;
   };
 
   return new Promise<MatchResult | null>((resolve) => {
     let found = false;
+    let matchSnippet = "";
     let summary = "";
     let id = path.basename(filePath, ".jsonl");
     let firstMessage = "";
@@ -835,13 +877,17 @@ async function searchSingleSession(
         if (entry.costUSD) totalCost += entry.costUSD;
         if (entry.model) model = entry.model;
 
-        // Check for match in content and summary
+        // Check for match in content and summary, capture snippet on first hit
         if (!found) {
-          if (
-            (content && content.toLowerCase().includes(lowerQuery)) ||
-            (summary && summary.toLowerCase().includes(lowerQuery))
-          ) {
+          const matchSource =
+            content && content.toLowerCase().includes(lowerQuery)
+              ? content
+              : summary && summary.toLowerCase().includes(lowerQuery)
+                ? summary
+                : null;
+          if (matchSource) {
             found = true;
+            matchSnippet = extractSnippet(matchSource, lowerQuery);
           }
         }
       } catch {
@@ -853,7 +899,15 @@ async function searchSingleSession(
       signal?.removeEventListener("abort", onAbort);
       safeResolve(
         found
-          ? { id, summary, firstMessage, turnCount, cost: totalCost, model }
+          ? {
+              id,
+              summary,
+              firstMessage,
+              turnCount,
+              cost: totalCost,
+              model,
+              matchSnippet,
+            }
           : null,
       );
     });
