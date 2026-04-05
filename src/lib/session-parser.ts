@@ -42,6 +42,32 @@ interface JSONLEntry {
   timestamp?: string;
 }
 
+/**
+ * Replace lone UTF-16 surrogates with U+FFFD (REPLACEMENT CHARACTER).
+ * Session JSONL may contain lone surrogates that crash Raycast's
+ * render tree serializer with "Cannot parse render tree JSON".
+ */
+function sanitizeString(str: string): string {
+  return str.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "\uFFFD",
+  );
+}
+
+/**
+ * Truncate a string without splitting UTF-16 surrogate pairs.
+ * If the cut point lands on a high surrogate, backs off by one character.
+ */
+export function safeTruncate(str: string, maxLen: number, suffix = ""): string {
+  if (str.length <= maxLen) return str;
+  let end = maxLen;
+  const code = str.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) {
+    end--;
+  }
+  return str.slice(0, end) + suffix;
+}
+
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
 
@@ -298,7 +324,7 @@ async function parseSessionMetadataFast(
         const entry: JSONLEntry = JSON.parse(line);
 
         if (entry.type === "summary") {
-          result.summary = entry.summary || "";
+          result.summary = sanitizeString(entry.summary || "");
           result.id = entry.leafUuid || path.basename(filePath, ".jsonl");
         }
 
@@ -307,10 +333,12 @@ async function parseSessionMetadataFast(
           if (!result.firstMessage && entry.message?.content) {
             const content = entry.message.content;
             if (typeof content === "string") {
-              result.firstMessage = content.slice(0, 200);
+              result.firstMessage = sanitizeString(safeTruncate(content, 200));
             } else if (Array.isArray(content)) {
               const textBlock = content.find((b) => b.type === "text");
-              result.firstMessage = textBlock?.text?.slice(0, 200) || "";
+              result.firstMessage = sanitizeString(
+                safeTruncate(textBlock?.text || "", 200),
+              );
             }
           }
         }
@@ -402,23 +430,25 @@ async function parseFullSession(
         const entry: JSONLEntry = JSON.parse(line);
 
         if (entry.type === "summary") {
-          summary = entry.summary || "";
+          summary = sanitizeString(entry.summary || "");
           id = entry.leafUuid || id;
         }
 
         if (entry.type === "user" || entry.type === "human") {
           let content = "";
           if (typeof entry.message?.content === "string") {
-            content = entry.message.content;
+            content = sanitizeString(entry.message.content);
           } else if (Array.isArray(entry.message?.content)) {
-            content = entry.message.content
-              .filter((b) => b.type === "text")
-              .map((b) => b.text)
-              .join("\n");
+            content = sanitizeString(
+              entry.message.content
+                .filter((b) => b.type === "text")
+                .map((b) => b.text)
+                .join("\n"),
+            );
           }
 
           if (!firstMessage) {
-            firstMessage = content.slice(0, 200);
+            firstMessage = safeTruncate(content, 200);
           }
 
           messages.push({
@@ -433,7 +463,7 @@ async function parseFullSession(
           let hasToolUse = false;
 
           if (typeof entry.message?.content === "string") {
-            content = entry.message.content;
+            content = sanitizeString(entry.message.content);
           } else if (Array.isArray(entry.message?.content)) {
             for (const block of entry.message.content) {
               if (block.type === "text") {
@@ -442,6 +472,7 @@ async function parseFullSession(
                 hasToolUse = true;
               }
             }
+            content = sanitizeString(content);
           }
 
           messages.push({
@@ -771,7 +802,7 @@ async function searchSingleSession(
         const entry: JSONLEntry = JSON.parse(line);
 
         if (entry.type === "summary") {
-          summary = entry.summary || "";
+          summary = sanitizeString(entry.summary || "");
           id = entry.leafUuid || id;
         }
 
@@ -779,19 +810,21 @@ async function searchSingleSession(
         let content = "";
         if (entry.message?.content) {
           if (typeof entry.message.content === "string") {
-            content = entry.message.content;
+            content = sanitizeString(entry.message.content);
           } else if (Array.isArray(entry.message.content)) {
-            content = entry.message.content
-              .filter((b) => b.type === "text")
-              .map((b) => b.text || "")
-              .join(" ");
+            content = sanitizeString(
+              entry.message.content
+                .filter((b) => b.type === "text")
+                .map((b) => b.text || "")
+                .join(" "),
+            );
           }
         }
 
         if (entry.type === "user" || entry.type === "human") {
           turnCount++;
           if (!firstMessage && content) {
-            firstMessage = content.slice(0, 200);
+            firstMessage = safeTruncate(content, 200);
           }
         }
 

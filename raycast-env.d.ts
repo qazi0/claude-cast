@@ -28,6 +28,8 @@ declare namespace Preferences {
   export type AskClaude = ExtensionPreferences & {}
   /** Preferences accessible in the `browse-sessions` command */
   export type BrowseSessions = ExtensionPreferences & {}
+  /** Preferences accessible in the `deep-search-sessions` command */
+  export type DeepSearchSessions = ExtensionPreferences & {}
   /** Preferences accessible in the `launch-project` command */
   export type LaunchProject = ExtensionPreferences & {}
   /** Preferences accessible in the `quick-continue` command */
@@ -49,6 +51,8 @@ declare namespace Arguments {
   export type AskClaude = {}
   /** Arguments passed to the `browse-sessions` command */
   export type BrowseSessions = {}
+  /** Arguments passed to the `deep-search-sessions` command */
+  export type DeepSearchSessions = {}
   /** Arguments passed to the `launch-project` command */
   export type LaunchProject = {}
   /** Arguments passed to the `quick-continue` command */
