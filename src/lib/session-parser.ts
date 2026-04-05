@@ -73,7 +73,11 @@ export function safeTruncate(str: string, maxLen: number, suffix = ""): string {
  * Extract a short contextual snippet around the first occurrence of a query.
  * Normalizes whitespace so multiline session content produces clean subtitles.
  */
-function extractSnippet(text: string, query: string, contextWords = 15): string {
+function extractSnippet(
+  text: string,
+  query: string,
+  contextWords = 15,
+): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   const lower = normalized.toLowerCase();
   const idx = lower.indexOf(query.toLowerCase());
