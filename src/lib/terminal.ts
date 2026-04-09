@@ -112,7 +112,7 @@ name: ${lcId}
 windows:
   - tabs:
       - layout:
-          cwd: "${cwd}"
+          cwd: "${cwd.replace(/"/g, '\\"')}"
           commands:
             - exec: "${command.replace(/"/g, '\\"')}"
 `;
@@ -125,7 +125,7 @@ windows:
     } catch {
       /* ignore */
     }
-  }, 5000);
+  }, 30_000);
 }
 
 async function openInKitty(command: string, cwd: string): Promise<void> {
