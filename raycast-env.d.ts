@@ -31,7 +31,12 @@ declare namespace Preferences {
   /** Preferences accessible in the `deep-search-sessions` command */
   export type DeepSearchSessions = ExtensionPreferences & {}
   /** Preferences accessible in the `launch-project` command */
-  export type LaunchProject = ExtensionPreferences & {}
+  export type LaunchProject = ExtensionPreferences & {
+  /** Permission Mode - Default permission mode for new sessions launched from this command */
+  "permissionMode": "default" | "plan" | "acceptEdits" | "auto" | "bypassPermissions",
+  /** Model Override - Override the extension's default model for sessions launched from this command */
+  "model": "" | "sonnet" | "opus" | "haiku"
+}
   /** Preferences accessible in the `quick-continue` command */
   export type QuickContinue = ExtensionPreferences & {}
   /** Preferences accessible in the `git-actions` command */
