@@ -11,6 +11,10 @@
 
 - **Extension description**: Refreshed the store and repository description to highlight session search, instant resume, and agentic automation alongside quick prompts.
 
+### Contributors
+
+- Ghostty and Warp terminal launch fixes by [@Haknt](https://github.com/Haknt) ([#1](https://github.com/qazi0/claude-cast/pull/1))
+
 ## [1.5.0] - 2026-04-30
 
 ### Added
