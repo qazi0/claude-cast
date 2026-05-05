@@ -6,7 +6,8 @@
   "icon": "command-icon.png",
   "author": "qazi0",
   "contributors": [
-    "roderickjdunn"
+    "roderickjdunn",
+    "user_675a985a803f8cc8105b"
   ],
   "categories": [
     "Developer Tools",
@@ -268,6 +269,24 @@
         {
           "title": "Ghostty",
           "value": "Ghostty"
+        }
+      ]
+    },
+    {
+      "name": "openIn",
+      "title": "Open In",
+      "description": "Whether to open Claude Code sessions in a new window or a new tab. Notes: kitty's New Tab requires `allow_remote_control yes` and a `listen_on` socket in kitty.conf (otherwise falls back to a new window). Warp always opens a new window.",
+      "type": "dropdown",
+      "default": "window",
+      "required": false,
+      "data": [
+        {
+          "title": "New Window",
+          "value": "window"
+        },
+        {
+          "title": "New Tab",
+          "value": "tab"
         }
       ]
     },
