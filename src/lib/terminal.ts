@@ -36,6 +36,7 @@ function normalizeModelName(model: string): string {
 }
 
 type TerminalApp = "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty";
+type OpenIn = "window" | "tab";
 
 /**
  * Open a new terminal window/tab and run a command
@@ -45,33 +46,37 @@ export async function openTerminalWithCommand(
   options: {
     cwd?: string;
     terminalApp?: string;
+    openIn?: OpenIn;
   } = {},
 ): Promise<void> {
   const preferences = getPreferenceValues<Preferences>();
   const terminal = (options.terminalApp ||
     preferences.terminalApp ||
     "Terminal") as TerminalApp;
+  const openIn: OpenIn =
+    options.openIn || (preferences.openIn as OpenIn | undefined) || "window";
   const cwd = expandTilde(options.cwd || "") || homedir() || "/";
 
   try {
     switch (terminal) {
       case "Terminal":
-        await openInTerminalApp(command, cwd);
+        await openInTerminalApp(command, cwd, openIn);
         break;
       case "iTerm":
-        await openInITerm(command, cwd);
+        await openInITerm(command, cwd, openIn);
         break;
       case "Warp":
+        // Warp's YAML launch config always opens a new window; openIn is N/A
         await openInWarp(command, cwd);
         break;
       case "kitty":
-        await openInKitty(command, cwd);
+        await openInKitty(command, cwd, openIn);
         break;
       case "Ghostty":
-        await openInGhostty(command, cwd);
+        await openInGhostty(command, cwd, openIn);
         break;
       default:
-        await openInTerminalApp(command, cwd);
+        await openInTerminalApp(command, cwd, openIn);
     }
   } catch (error) {
     await showToast({
@@ -82,33 +87,83 @@ export async function openTerminalWithCommand(
   }
 }
 
-async function openInTerminalApp(command: string, cwd: string): Promise<void> {
-  const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, "\\$");
-  const escapedCwd = cwd.replace(/"/g, '\\"');
-
-  const script = `
-    tell application "Terminal"
-      activate
-      do script "cd \\"${escapedCwd}\\" && ${escapedCommand}"
-    end tell
-  `;
-
-  await execFilePromise("osascript", ["-e", script]);
+async function openInTerminalApp(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
+  if (openIn === "tab") {
+    // ⌘T keystroke via System Events creates a real new tab.
+    // Raycast has Accessibility permission so this works from the extension.
+    const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, "\\$");
+    const escapedCwd = cwd.replace(/"/g, '\\"');
+    const script = `
+      tell application "Terminal"
+        activate
+      end tell
+      delay 0.2
+      tell application "System Events"
+        keystroke "t" using command down
+      end tell
+      delay 0.3
+      tell application "Terminal"
+        do script "cd \\"${escapedCwd}\\" && ${escapedCommand}" in front window
+      end tell
+    `;
+    await execFilePromise("osascript", ["-e", script]);
+  } else {
+    // Write command to a temp .command file and open it with Terminal.
+    // 'open -a Terminal file.command' always spawns a fresh window.
+    const tempFile = join(tmpdir(), `claudecast-${Date.now()}.command`);
+    const escapedCwdForBash = cwd.replace(/"/g, '\\"');
+    writeFileSync(
+      tempFile,
+      `#!/bin/bash\ncd "${escapedCwdForBash}"\nrm -f "${tempFile}"\n${command}\n`,
+      { mode: 0o755 },
+    );
+    await execFilePromise("open", ["-a", "Terminal", tempFile]);
+  }
 }
 
-async function openInITerm(command: string, cwd: string): Promise<void> {
+async function openInITerm(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
   const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, "\\$");
   const escapedCwd = cwd.replace(/"/g, '\\"');
 
-  const script = `
-    tell application "iTerm"
-      activate
-      create window with default profile
-      tell current session of current window
-        write text "cd \\"${escapedCwd}\\" && ${escapedCommand}"
+  let script: string;
+  if (openIn === "tab") {
+    script = `
+      tell application "iTerm"
+        activate
+        if (count of windows) > 0 then
+          tell current window
+            create tab with default profile
+            tell current session
+              write text "cd \\"${escapedCwd}\\" && ${escapedCommand}"
+            end tell
+          end tell
+        else
+          create window with default profile
+          tell current session of current window
+            write text "cd \\"${escapedCwd}\\" && ${escapedCommand}"
+          end tell
+        end if
       end tell
-    end tell
-  `;
+    `;
+  } else {
+    script = `
+      tell application "iTerm"
+        activate
+        create window with default profile
+        tell current session of current window
+          write text "cd \\"${escapedCwd}\\" && ${escapedCommand}"
+        end tell
+      end tell
+    `;
+  }
 
   await execFilePromise("osascript", ["-e", script]);
 }
@@ -125,6 +180,9 @@ function escapeYamlDoubleQuoted(s: string): string {
     .replace(/\t/g, "\\t");
 }
 
+// Warp's YAML launch config opens a new window; openIn does not apply here
+// (the previous warp://action/new_tab?command= URL scheme was unreliable
+// at executing the command).
 async function openInWarp(command: string, cwd: string): Promise<void> {
   // Use dynamic launch configuration for reliable command execution
   const lcId = randomUUID();
@@ -154,10 +212,32 @@ windows:
   }, 30_000);
 }
 
-async function openInKitty(command: string, cwd: string): Promise<void> {
-  // Kitty can be invoked directly via execFile with array arguments
+async function openInKitty(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
+  // Real tabs require kitty's remote-control API, which the user must
+  // opt into by adding `allow_remote_control yes` and a `listen_on` socket
+  // to ~/.config/kitty/kitty.conf. If that's not configured, fall back
+  // to opening a new OS window.
+  if (openIn === "tab") {
+    try {
+      await execFilePromise("kitten", [
+        "@",
+        "launch",
+        "--type=tab",
+        `--cwd=${cwd}`,
+        "sh",
+        "-c",
+        command,
+      ]);
+      return;
+    } catch {
+      // Remote control not configured — fall through to window mode
+    }
+  }
   await execFilePromise("kitty", [
-    "--single-instance",
     `--directory=${cwd}`,
     "-e",
     "sh",
@@ -166,18 +246,25 @@ async function openInKitty(command: string, cwd: string): Promise<void> {
   ]);
 }
 
-async function openInGhostty(command: string, cwd: string): Promise<void> {
+async function openInGhostty(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
   const escapedCommand = command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const escapedCwd = cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
-  // Use Ghostty's native AppleScript API with surface configuration
+  // Use Ghostty's native AppleScript API with surface configuration.
+  // `new tab` opens the surface as a tab in the front window when one
+  // exists; `new window` always spawns a fresh window.
+  const target = openIn === "tab" ? "new tab" : "new window";
   const script = `
     tell application "Ghostty"
       activate
       set cfg to new surface configuration
       set initial working directory of cfg to "${escapedCwd}"
       set initial input of cfg to "${escapedCommand}" & (ASCII character 10)
-      new window with configuration cfg
+      ${target} with configuration cfg
     end tell
   `;
 

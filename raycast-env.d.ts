@@ -12,6 +12,8 @@ type ExtensionPreferences = {
   "defaultModel": "sonnet" | "opus" | "haiku",
   /** Terminal Application - The terminal app to use for launching Claude Code sessions */
   "terminalApp": "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty",
+  /** Open In - Whether to open Claude Code sessions in a new window or a new tab. Notes: kitty's New Tab requires `allow_remote_control yes` and a `listen_on` socket in kitty.conf (otherwise falls back to a new window). Warp always opens a new window. */
+  "openIn": "window" | "tab",
   /** Claude Code Path - Path to the claude CLI binary (leave empty for auto-detection) */
   "claudeCodePath"?: string,
   /** Anthropic API Key - Your Anthropic API key for pay-as-you-go billing (console.anthropic.com). Use this OR OAuth Token. */
