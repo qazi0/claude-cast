@@ -78,7 +78,10 @@ export async function getClaudePath(): Promise<string | null> {
 }
 
 /**
- * Execute a prompt using Claude CLI
+ * Execute a prompt using Claude CLI.
+ *
+ * The default 10-minute timeout covers most reviews of large diffs / contexts.
+ * Callers with shorter or longer expectations can pass `timeoutMs` explicitly.
  */
 export async function executePrompt(
   prompt: string,
@@ -87,6 +90,7 @@ export async function executePrompt(
     context?: string;
     cwd?: string;
     sessionId?: string;
+    timeoutMs?: number;
   } = {},
 ): Promise<ClaudeResponse> {
   const claudePath = await getClaudePath();
@@ -98,6 +102,7 @@ export async function executePrompt(
 
   const preferences = getPreferenceValues<Preferences>();
   const model = options.model || preferences.defaultModel || "sonnet";
+  const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
 
   // Build the full prompt with context
   let fullPrompt = prompt;
@@ -149,11 +154,11 @@ export async function executePrompt(
     let stdout = "";
     let stderr = "";
 
-    // Add timeout (2 minutes)
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error("Claude CLI timed out after 2 minutes"));
-    }, 120000);
+      const minutes = Math.round(timeoutMs / 60000);
+      reject(new Error(`Claude CLI timed out after ${minutes} minutes`));
+    }, timeoutMs);
 
     child.stdout.on("data", (data) => {
       stdout += data.toString();
@@ -398,6 +403,30 @@ export async function isAuthConfigured(): Promise<boolean> {
   const { getPreferenceValues } = await import("@raycast/api");
   const preferences = getPreferenceValues<Preferences>();
   return !!(preferences.anthropicApiKey || preferences.oauthToken);
+}
+
+/**
+ * Ensure auth is configured for non-interactive Claude API calls. Returns true
+ * if a token or API key is set in preferences, otherwise shows a Failure toast
+ * with a "Open Preferences" action and returns false. Callers should bail when
+ * this returns false rather than spawning claude (which would show its own
+ * /login prompt inside the CLI TUI).
+ */
+export async function ensureClaudeApiAuth(): Promise<boolean> {
+  if (await isAuthConfigured()) return true;
+  const { showToast, Toast, openCommandPreferences } =
+    await import("@raycast/api");
+  await showToast({
+    style: Toast.Style.Failure,
+    title: "Claude authentication missing",
+    message:
+      "Set OAuth Token (claude setup-token) or Anthropic API Key in preferences",
+    primaryAction: {
+      title: "Open Preferences",
+      onAction: () => openCommandPreferences(),
+    },
+  });
+  return false;
 }
 
 /**

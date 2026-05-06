@@ -10,9 +10,9 @@
 type ExtensionPreferences = {
   /** Default Model - The default Claude model to use for prompts */
   "defaultModel": "sonnet" | "opus" | "haiku",
-  /** Terminal Application - The terminal app to use for launching Claude Code sessions */
-  "terminalApp": "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty",
-  /** Open In - Whether to open Claude Code sessions in a new window or a new tab. Notes: kitty's New Tab requires `allow_remote_control yes` and a `listen_on` socket in kitty.conf (otherwise falls back to a new window). Warp always opens a new window. */
+  /** Terminal Application - Choose which terminal opens new Claude Code sessions. Each app uses its native AppleScript or CLI so launches are reliable across macOS updates. */
+  "terminalApp": "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty" | "cmux",
+  /** Open In - Choose whether new Claude Code sessions open in a new terminal window or a new tab in the front window. Per-terminal notes: kitty New Tab requires `allow_remote_control yes` and a `listen_on` socket in `kitty.conf` (otherwise falls back to a new window). Warp always opens a new window regardless of this setting. */
   "openIn": "window" | "tab",
   /** Claude Code Path - Path to the claude CLI binary (leave empty for auto-detection) */
   "claudeCodePath"?: string,
@@ -49,7 +49,7 @@ declare namespace Preferences {
   export type TransformSelection = ExtensionPreferences & {}
   /** Preferences accessible in the `menu-bar-monitor` command */
   export type MenuBarMonitor = ExtensionPreferences & {
-  /** undefined - Display today's cost next to the menu bar icon */
+  /** undefined - Display today's spend (USD) next to the menu bar icon. Updates every 30 seconds. */
   "showCostInMenuBar": boolean
 }
   /** Preferences accessible in the `usage-dashboard` command */

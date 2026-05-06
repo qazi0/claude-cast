@@ -392,6 +392,12 @@ function formatSessionMarkdown(session: SessionDetail): string {
     md += `> ${session.summary}\n\n`;
   }
 
+  // session.messages is already capped at the parser layer (last N most recent).
+  // session.totalMessageCount is the original pre-cap count.
+  if (session.totalMessageCount > session.messages.length) {
+    md += `*Showing last ${session.messages.length} of ${session.totalMessageCount} messages.*\n\n`;
+  }
+
   md += `---\n\n`;
   md += `## Conversation\n\n`;
 
@@ -403,17 +409,27 @@ function formatSessionMarkdown(session: SessionDetail): string {
   }
 
   if (session.messages.length > 20) {
-    md += `\n*...and ${session.messages.length - 20} more messages*\n`;
+    md += `\n*...and ${session.messages.length - 20} more messages in this view*\n`;
   }
 
   return md;
 }
 
 function formatConversationText(session: SessionDetail): string {
-  return session.messages
+  // session.messages is already capped (default last 200) by the parser.
+  // The clipboard reflects what the user is actually viewing.
+  const body = session.messages
     .map((m) => {
       const role = m.type === "user" ? "User" : "Claude";
       return `${role}: ${m.content}`;
     })
     .join("\n\n");
+
+  if (session.totalMessageCount > session.messages.length) {
+    return (
+      body +
+      `\n\n[truncated: copied last ${session.messages.length} of ${session.totalMessageCount} messages]`
+    );
+  }
+  return body;
 }

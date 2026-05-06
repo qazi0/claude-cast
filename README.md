@@ -166,7 +166,7 @@ Some features (Ask Claude Code, Transform Selection, Git Actions) require an OAu
 Open Raycast preferences and configure ClaudeCast:
 
 - **Default Model**: Choose between Sonnet (balanced), Opus (most capable), or Haiku (fastest)
-- **Terminal Application**: Select your preferred terminal (Terminal, iTerm, Warp, Kitty, Ghostty)
+- **Terminal Application**: Select your preferred terminal (Terminal, iTerm, Warp, Kitty, Ghostty, cmux)
 - **Claude Code Path**: Optionally specify a custom path to the Claude CLI binary
 - **OAuth Token**: Long-lived token from `claude setup-token` (required for API features)
 

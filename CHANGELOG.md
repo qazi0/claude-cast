@@ -1,6 +1,27 @@
 # ClaudeCast Changelog
 
-## [1.7.0] - {PR_MERGE_DATE}
+## [1.8.0] - {PR_MERGE_DATE}
+
+### Added
+
+- **cmux Terminal Support**: Added cmux ([cmux.com](https://cmux.com)) as a first-class terminal alongside Terminal, iTerm, Warp, kitty, and Ghostty. Sessions launch via the macOS open-handler so cwd is set as the shell's process pwd, then the command types and submits via cmux's own input pipeline (no Accessibility permission needed). cmux honors the global Open In preference: New Tab uses the open-handler path; New Window uses cmux's AppleScript `new window` verb plus a typed `cd "<cwd>" && <command>`.
+- **Usage Dashboard Revamp**: Real SVG bar chart for daily cost trend (instead of ASCII), side-by-side range comparison table, top projects table, top sessions table with project + first-message preview + cost. Sidebar metadata shows totals, token breakdowns, top projects as colored tags, and the most expensive session.
+- **Auth Gate for Claude API Commands**: Ask Claude Code, Git Actions, Transform Selection, and Agentic Workflows now check for an OAuth token or Anthropic API key in extension preferences before invoking the CLI. When auth is missing, the user gets a friendly "Add token in preferences" toast instead of seeing the CLI's `/login` prompt inside the spawned process.
+
+### Fixed
+
+- **Cost Calculation: Streaming Chunk Deduplication**: Anthropic streams response chunks where each chunk's `usage` is cumulative. Naive summing inflated session totals by 2x to 4x. Now deduped by `(message.id, requestId)` so per-message totals reflect the final cumulative value once per request.
+- **Cost Calculation: Sonnet 200K Token Tier**: Above 200K input tokens per message, Sonnet rates double. The pricing table now applies tier pricing per message (per request), so heavy sessions are no longer underbilled by ~43%.
+- **Cost Calculation: Opus 4.7 Pricing Row**: Added an explicit `opus-4-7` row at the $5/$25 tier. Without it, Opus 4.7 sessions matched the older `opus` substring and were billed at the $15/$75 tier (3x overcharge).
+- **Cost Calculation: Daily Chart Bucketing**: Daily costs are now attributed to each day's actual usage timestamps. Previously a multi-day session stamped all of its cost on the file's last-modified date.
+- **Cost Calculation: Opus 4.1 Pricing Row**: Added an explicit `opus-4-1` row at the $15/$75 tier for users still resuming pre-4.5 sessions.
+- **OOM Crashes (menu-bar-monitor, usage-dashboard, browse-sessions)**: Multiple structural fixes for "JS heap out of memory" worker crashes affecting users with large session histories. Persistent LocalStorage cache for today's stats so menu-bar cold starts don't re-scan; `LaunchType.Background` skip of the project-discovery scan; bounded newest-first iterator in `listAllSessions` that stops statting once it has the top N; message and content caps in `getSessionDetail` (last 200 messages, 5KB per message) so browse-sessions detail view stops materializing megabyte arrays into React state; explicit stream-listener cleanup in `streamSessionUsage` for back-to-back invocations.
+- **Terminal Launch: `$` Escape Bug**: Stopped escaping `$` in commands sent to Terminal.app and iTerm. Previously a command like `bash -c 'echo $SHELL'` would print the literal text `$SHELL` instead of expanding the variable.
+- **`usage-dashboard` Redundant Daily Stats Scans**: The 7-day daily stats no longer reload on every range tab switch (today/week/month/all). Loaded once on mount.
+- **`calculateStatsWithUsage` Mutation**: Stopped mutating SessionMetadata objects with computed costs. Top sessions are now a lightweight `{id, projectName, firstMessage, cost}` projection.
+- **Per-Project Path Resolution**: Memoized within each stats call so each unique project directory is resolved at most once per call instead of once per session.
+
+## [1.7.0] - 2026-05-05
 
 ### Added
 
