@@ -252,6 +252,7 @@ async function openInKitty(
     }
   }
   await execFilePromise("kitty", [
+    "--single-instance",
     `--directory=${cwd}`,
     "-e",
     "sh",

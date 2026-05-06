@@ -5,8 +5,8 @@
 ### Added
 
 - **cmux Terminal Support**: Added cmux ([cmux.com](https://cmux.com)) as a first-class terminal alongside Terminal, iTerm, Warp, kitty, and Ghostty. Sessions launch via the macOS open-handler so cwd is set as the shell's process pwd, then the command types and submits via cmux's own input pipeline (no Accessibility permission needed). cmux honors the global Open In preference: New Tab uses the open-handler path; New Window uses cmux's AppleScript `new window` verb plus a typed `cd "<cwd>" && <command>`.
-- **Usage Dashboard Revamp**: Real SVG bar chart for daily cost trend (instead of ASCII), side-by-side range comparison table, top projects table, top sessions table with project + first-message preview + cost. Sidebar metadata shows totals, token breakdowns, top projects as colored tags, and the most expensive session.
-- **Auth Gate for Claude API Commands**: Ask Claude Code, Git Actions, Transform Selection, and Agentic Workflows now check for an OAuth token or Anthropic API key in extension preferences before invoking the CLI. When auth is missing, the user gets a friendly "Add token in preferences" toast instead of seeing the CLI's `/login` prompt inside the spawned process.
+- **Usage Dashboard Revamp**: Real SVG bar chart for daily cost trend, side-by-side range comparison table, top projects table, top sessions table with project + first-message preview + cost. Sidebar metadata shows totals, token breakdowns, top projects as colored tags, and the most expensive session.
+- **Auth Gate for Claude API Commands**: Ask Claude Code, Git Actions, Transform Selection, and Agentic Workflows preflight authentication before invoking the CLI. The check accepts Raycast preferences (`anthropicApiKey`, `oauthToken`), the env vars `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_OAUTH_TOKEN`, and existing credentials reported by `claude auth status --json`. When none are present the user gets a friendly "Add token in preferences" toast instead of seeing the CLI's `/login` prompt inside the spawned process.
 
 ### Fixed
 
@@ -20,6 +20,8 @@
 - **`usage-dashboard` Redundant Daily Stats Scans**: The 7-day daily stats no longer reload on every range tab switch (today/week/month/all). Loaded once on mount.
 - **`calculateStatsWithUsage` Mutation**: Stopped mutating SessionMetadata objects with computed costs. Top sessions are now a lightweight `{id, projectName, firstMessage, cost}` projection.
 - **Per-Project Path Resolution**: Memoized within each stats call so each unique project directory is resolved at most once per call instead of once per session.
+- **Session Detail View: Last 20 Messages**: Browse Sessions and Deep Search Sessions detail views now render the most recent 20 messages, with an accurate "Showing last N of M messages" notice keyed to the rendered count. The banner now appears for any session with more than 20 messages.
+- **Kitty Window Mode**: Restored `--single-instance` so window-mode launches reuse the running kitty instance rather than spawning a separate process.
 
 ## [1.7.0] - 2026-05-05
 
