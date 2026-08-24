@@ -21,9 +21,7 @@ type ExtensionPreferences = {
   /** Anthropic API Key - Your Anthropic API key for pay-as-you-go billing (console.anthropic.com). Use this OR OAuth Token. */
   "anthropicApiKey"?: string,
   /** OAuth Token (Claude Subscription) - For Claude Pro/Team subscribers: Run 'claude setup-token' in terminal and paste the token here. */
-  "oauthToken"?: string,
-  /** Subscription Usage OAuth Token - A Claude OAuth access token with the user:profile scope. Used only for api.anthropic.com subscription limits. This is separate from the setup-token prompt credential and Anthropic API key. */
-  "subscriptionUsageOAuthToken"?: string
+  "oauthToken"?: string
 }
 
 /** Preferences accessible in all the extension's commands */
