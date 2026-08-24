@@ -3,14 +3,18 @@ import {
   getSelectedText,
   getFrontmostApplication,
 } from "@raycast/api";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import os from "os";
 import { getGitInfo } from "./project-discovery";
+import { getMostRecentGitWorkspace } from "./vscode-storage";
 
-const execPromise = promisify(exec);
+const execFilePromise = promisify(execFile);
+
+// Known editor process names for AppleScript interactions (whitelist for security)
+const KNOWN_EDITORS = ["Code", "Cursor", "Code - Insiders", "VSCodium"];
 
 export interface CapturedContext {
   selectedText?: string;
@@ -53,54 +57,72 @@ async function detectVSCodeProject(): Promise<{
   projectPath?: string;
   currentFile?: string;
 }> {
-  try {
-    const frontmost = await getFrontmostApplication();
+  // Try to get window title from each known editor via AppleScript
+  // Only use whitelisted editors for security
+  for (const editorProcess of KNOWN_EDITORS) {
+    try {
+      const script = `tell application "System Events" to tell process "${editorProcess}" to get name of front window`;
+      const { stdout } = await execFilePromise("osascript", ["-e", script], {
+        timeout: 2000,
+      });
 
-    // Check if VS Code or similar editor is frontmost
-    const editors = [
-      "Code",
-      "Code - Insiders",
-      "Cursor",
-      "VSCodium",
-      "Visual Studio Code",
-    ];
-    if (!editors.some((e) => frontmost.name.includes(e))) {
-      return {};
-    }
-
-    // Try to get window title using AppleScript
-    const { stdout } = await execPromise(`
-      osascript -e '
-        tell application "System Events"
-          tell process "${frontmost.name}"
-            get name of front window
-          end tell
-        end tell
-      '
-    `);
-
-    const windowTitle = stdout.trim();
-    // VS Code window title format: "filename - folder - VS Code"
-    // or "folder - VS Code"
-    const parts = windowTitle.split(" - ");
-
-    let currentFile: string | undefined;
-    let projectPath: string | undefined;
-
-    if (parts.length >= 2) {
-      // Check if first part looks like a file
-      if (parts[0].includes(".")) {
-        currentFile = parts[0];
-        projectPath = await findProjectPath(parts[1]);
-      } else {
-        projectPath = await findProjectPath(parts[0]);
+      const windowTitle = stdout.trim();
+      if (windowTitle) {
+        const result = parseVSCodeWindowTitle(windowTitle);
+        if (result.projectPath) {
+          const fullPath = await findProjectPath(result.projectPath);
+          if (fullPath) {
+            return { projectPath: fullPath, currentFile: result.currentFile };
+          }
+        }
       }
+    } catch {
+      // Editor not running or no window, try next
     }
-
-    return { projectPath, currentFile };
-  } catch {
-    return {};
   }
+
+  // Fallback: check recent workspaces from storage
+  const recentProject = await getVSCodeRecentWorkspace();
+  if (recentProject) {
+    return { projectPath: recentProject };
+  }
+
+  return {};
+}
+
+/**
+ * Parse VS Code window title to extract project and file info
+ */
+function parseVSCodeWindowTitle(windowTitle: string): {
+  projectPath?: string;
+  currentFile?: string;
+} {
+  // VS Code window title format: "filename - folder - VS Code"
+  // or "folder - VS Code"
+  const parts = windowTitle.split(" - ");
+
+  let currentFile: string | undefined;
+  let projectPath: string | undefined;
+
+  if (parts.length >= 2) {
+    // Check if first part looks like a file
+    if (parts[0].includes(".")) {
+      currentFile = parts[0];
+      projectPath = parts[1];
+    } else {
+      projectPath = parts[0];
+    }
+  }
+
+  return { projectPath, currentFile };
+}
+
+/**
+ * Get the most recent VS Code workspace from storage
+ * Uses shared utility to avoid code duplication
+ */
+async function getVSCodeRecentWorkspace(): Promise<string | undefined> {
+  return getMostRecentGitWorkspace();
 }
 
 /**
@@ -142,13 +164,20 @@ async function findProjectPath(
     for (const dir of dirs) {
       // Decode the path and check if it ends with the project name
       const decodedPath = "/" + dir.slice(1).replace(/-/g, "/");
+
+      // Security: Validate that decoded path is absolute and doesn't contain traversal
+      const normalizedPath = path.normalize(decodedPath);
+      if (!path.isAbsolute(normalizedPath) || normalizedPath.includes("..")) {
+        continue; // Skip suspicious paths
+      }
+
       if (
         decodedPath.endsWith(`/${projectName}`) ||
         path.basename(decodedPath) === projectName
       ) {
         try {
-          await fs.promises.access(decodedPath);
-          return decodedPath;
+          await fs.promises.access(normalizedPath);
+          return normalizedPath;
         } catch {
           // Path doesn't exist on disk anymore
         }

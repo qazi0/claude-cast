@@ -8,15 +8,28 @@ import {
   Toast,
   popToRoot,
   Color,
+  useNavigation,
 } from "@raycast/api";
 import { useState, useEffect } from "react";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { captureContext, CapturedContext } from "./lib/context-capture";
-import { executePrompt, ClaudeResponse } from "./lib/claude-cli";
+import {
+  executePrompt,
+  ClaudeResponse,
+  ensureClaudeApiAuth,
+  ensureClaudeInstalled,
+} from "./lib/claude-cli";
+import {
+  getAllProjects,
+  Project,
+  addRecentProject,
+} from "./lib/project-discovery";
 import { launchClaudeCode } from "./lib/terminal";
 
 const execPromise = promisify(exec);
+
+// Enum for explicit change requirements (more robust than string matching)
+type ChangeRequirement = "staged" | "unstaged" | "any" | "none";
 
 interface GitAction {
   id: string;
@@ -25,7 +38,8 @@ interface GitAction {
   icon: Icon;
   prompt: string;
   gitCommand: string;
-  requiresChanges: boolean;
+  /** What type of changes this action requires */
+  changeRequirement: ChangeRequirement;
   tintColor?: Color;
 }
 
@@ -38,7 +52,7 @@ const GIT_ACTIONS: GitAction[] = [
     prompt:
       "Review these staged changes. Look for bugs, potential issues, code quality concerns, and suggest improvements. Be specific about file names and line numbers.",
     gitCommand: "git diff --staged",
-    requiresChanges: true,
+    changeRequirement: "staged",
     tintColor: Color.Blue,
   },
   {
@@ -60,7 +74,7 @@ Rules:
 
 Return ONLY the commit message, nothing else.`,
     gitCommand: "git diff --staged",
-    requiresChanges: true,
+    changeRequirement: "staged",
     tintColor: Color.Green,
   },
   {
@@ -71,7 +85,7 @@ Return ONLY the commit message, nothing else.`,
     prompt:
       "Explain these changes in plain English. What was changed, why it might have been changed, and what effect it has. Be concise but thorough.",
     gitCommand: "git diff HEAD~1",
-    requiresChanges: false,
+    changeRequirement: "none",
     tintColor: Color.Purple,
   },
   {
@@ -82,7 +96,7 @@ Return ONLY the commit message, nothing else.`,
     prompt:
       "Review these unstaged changes. Identify any issues, suggest improvements, and note anything that looks incomplete or problematic.",
     gitCommand: "git diff",
-    requiresChanges: true,
+    changeRequirement: "unstaged",
     tintColor: Color.Orange,
   },
   {
@@ -93,14 +107,103 @@ Return ONLY the commit message, nothing else.`,
     prompt:
       "Summarize all the changes on this branch compared to main. Group by feature/area, highlight key changes, and provide a high-level overview suitable for a PR description.",
     gitCommand: "git diff main...HEAD",
-    requiresChanges: false,
+    changeRequirement: "none",
     tintColor: Color.Yellow,
   },
 ];
 
 export default function GitActions() {
   const [isLoading, setIsLoading] = useState(true);
-  const [context, setContext] = useState<CapturedContext | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    async function init() {
+      if (!(await ensureClaudeInstalled())) {
+        setIsLoading(false);
+        return;
+      }
+      if (!(await ensureClaudeApiAuth())) {
+        setIsLoading(false);
+        return;
+      }
+      setAuthReady(true);
+
+      const { favorites, recent, all } = await getAllProjects();
+      const seen = new Set<string>();
+      const ordered: Project[] = [];
+      for (const p of [...favorites, ...recent, ...all]) {
+        if (seen.has(p.path)) continue;
+        seen.add(p.path);
+        ordered.push(p);
+      }
+      setProjects(ordered);
+      setIsLoading(false);
+    }
+    init();
+  }, []);
+
+  if (!authReady && !isLoading) {
+    return null; // ensureClaudeApiAuth already showed a toast
+  }
+
+  return (
+    <List
+      isLoading={isLoading}
+      searchBarPlaceholder="Pick a project to run git actions on..."
+    >
+      {projects.length === 0 && !isLoading && (
+        <List.EmptyView
+          title="No Claude Code Projects Found"
+          description="Run Claude Code in any project first; recent projects appear here."
+          icon={Icon.Folder}
+        />
+      )}
+      {projects.map((p) => (
+        <ProjectPickerItem key={p.path} project={p} />
+      ))}
+    </List>
+  );
+}
+
+function ProjectPickerItem({ project }: { project: Project }) {
+  const accessories: List.Item.Accessory[] = [];
+  if (project.isFavorite) {
+    accessories.push({
+      icon: { source: Icon.Star, tintColor: Color.Yellow },
+      tooltip: "Favorite",
+    });
+  }
+  if (project.lastAccessed) {
+    accessories.push({ date: project.lastAccessed });
+  }
+  return (
+    <List.Item
+      title={project.name}
+      subtitle={project.path}
+      icon={Icon.Folder}
+      accessories={accessories}
+      actions={
+        <ActionPanel>
+          <Action.Push
+            title="Open Git Actions"
+            icon={Icon.MagnifyingGlass}
+            target={<GitActionsForProject projectPath={project.path} />}
+            onPush={() => addRecentProject(project.path)}
+          />
+          <Action.CopyToClipboard
+            title="Copy Project Path"
+            content={project.path}
+            shortcut={{ modifiers: ["cmd"], key: "c" }}
+          />
+        </ActionPanel>
+      }
+    />
+  );
+}
+
+function GitActionsForProject({ projectPath }: { projectPath: string }) {
+  const [isLoading, setIsLoading] = useState(true);
   const [gitStatus, setGitStatus] = useState<{
     hasStagedChanges: boolean;
     hasUnstagedChanges: boolean;
@@ -109,37 +212,24 @@ export default function GitActions() {
   } | null>(null);
 
   useEffect(() => {
-    async function init() {
-      const ctx = await captureContext();
-      setContext(ctx);
-
-      if (ctx.projectPath) {
-        const status = await checkGitStatus(ctx.projectPath);
-        setGitStatus(status);
-      } else {
-        setGitStatus({
-          hasStagedChanges: false,
-          hasUnstagedChanges: false,
-          branch: "",
-          isGitRepo: false,
-        });
-      }
-
+    async function load() {
+      const status = await checkGitStatus(projectPath);
+      setGitStatus(status);
       setIsLoading(false);
     }
-    init();
-  }, []);
+    load();
+  }, [projectPath]);
 
   if (isLoading) {
     return <List isLoading={true} />;
   }
 
-  if (!context?.projectPath || !gitStatus?.isGitRepo) {
+  if (!gitStatus?.isGitRepo) {
     return (
       <List>
         <List.EmptyView
-          title="No Git Repository Detected"
-          description="Open a project in VS Code or navigate to a git repository to use Git Actions"
+          title="Not a Git Repository"
+          description={`${projectPath} has no .git directory. Pick a different project.`}
           icon={Icon.ExclamationMark}
         />
       </List>
@@ -149,30 +239,46 @@ export default function GitActions() {
   return (
     <List searchBarPlaceholder="Search git actions...">
       <List.Section
-        title={`${context.projectPath}`}
+        title={projectPath}
         subtitle={gitStatus.branch ? `on ${gitStatus.branch}` : undefined}
       >
         {GIT_ACTIONS.map((action) => {
-          const isDisabled =
-            action.requiresChanges &&
-            ((action.gitCommand.includes("staged") &&
-              !gitStatus.hasStagedChanges) ||
-              (action.gitCommand === "git diff" &&
-                !gitStatus.hasUnstagedChanges));
+          let isDisabled = false;
+          let disabledReason: string | undefined;
+
+          switch (action.changeRequirement) {
+            case "staged":
+              if (!gitStatus.hasStagedChanges) {
+                isDisabled = true;
+                disabledReason = "No staged changes";
+              }
+              break;
+            case "unstaged":
+              if (!gitStatus.hasUnstagedChanges) {
+                isDisabled = true;
+                disabledReason = "No unstaged changes";
+              }
+              break;
+            case "any":
+              if (
+                !gitStatus.hasStagedChanges &&
+                !gitStatus.hasUnstagedChanges
+              ) {
+                isDisabled = true;
+                disabledReason = "No changes";
+              }
+              break;
+            case "none":
+              break;
+          }
 
           return (
             <GitActionItem
               key={action.id}
               action={action}
-              projectPath={context.projectPath!}
+              projectPath={projectPath}
               isDisabled={isDisabled}
-              disabledReason={
-                isDisabled
-                  ? action.gitCommand.includes("staged")
-                    ? "No staged changes"
-                    : "No unstaged changes"
-                  : undefined
-              }
+              disabledReason={disabledReason}
             />
           );
         })}
@@ -192,8 +298,8 @@ function GitActionItem({
   isDisabled: boolean;
   disabledReason?: string;
 }) {
+  const { push } = useNavigation();
   const [, setIsExecuting] = useState(false);
-  const [result, setResult] = useState<ClaudeResponse | null>(null);
 
   async function executeAction() {
     if (isDisabled) {
@@ -217,7 +323,7 @@ function GitActionItem({
         cwd: projectPath,
       });
 
-      if (!diff.trim() && action.requiresChanges) {
+      if (!diff.trim() && action.changeRequirement !== "none") {
         await showToast({
           style: Toast.Style.Failure,
           title: "No changes found",
@@ -227,19 +333,39 @@ function GitActionItem({
         return;
       }
 
+      const diffKB = Math.round(Buffer.byteLength(diff, "utf8") / 1024);
       await showToast({
         style: Toast.Style.Animated,
         title: "Asking Claude Code...",
+        message:
+          diffKB > 50
+            ? `Large diff (${diffKB} KB). This may take a few minutes.`
+            : undefined,
       });
 
-      // Send to Claude
+      // Scale timeout with diff size: ~30s per 50KB, min 3 min, max 15 min.
+      // Reviews of multi-hundred-KB diffs can legitimately take 5-10 min.
+      const timeoutMs = Math.min(
+        15 * 60 * 1000,
+        Math.max(3 * 60 * 1000, Math.ceil(diffKB / 50) * 30 * 1000),
+      );
+
       const response = await executePrompt(action.prompt, {
         context: `Git diff output:\n\`\`\`diff\n${diff}\n\`\`\``,
         cwd: projectPath,
+        timeoutMs,
       });
 
-      setResult(response);
       await showToast({ style: Toast.Style.Success, title: "Done" });
+
+      // Push to result view
+      push(
+        <GitActionResult
+          action={action}
+          result={response}
+          projectPath={projectPath}
+        />,
+      );
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -249,17 +375,6 @@ function GitActionItem({
     } finally {
       setIsExecuting(false);
     }
-  }
-
-  if (result) {
-    return (
-      <GitActionResult
-        action={action}
-        result={result}
-        projectPath={projectPath}
-        onBack={() => setResult(null)}
-      />
-    );
   }
 
   const accessories: List.Item.Accessory[] = [];
@@ -301,13 +416,12 @@ function GitActionResult({
   action,
   result,
   projectPath,
-  onBack,
 }: {
   action: GitAction;
   result: ClaudeResponse;
   projectPath: string;
-  onBack: () => void;
 }) {
+  const { pop } = useNavigation();
   const isCommitMessage = action.id === "write-commit";
 
   async function handleCommit() {
@@ -324,7 +438,7 @@ function GitActionResult({
       });
 
       await showToast({ style: Toast.Style.Success, title: "Commit created!" });
-      onBack();
+      pop();
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -383,7 +497,7 @@ function GitActionResult({
               title="Back to Actions"
               icon={Icon.ArrowLeft}
               shortcut={{ modifiers: ["cmd"], key: "[" }}
-              onAction={onBack}
+              onAction={pop}
             />
             <Action
               title="Continue in Terminal"

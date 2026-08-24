@@ -7,13 +7,6 @@ import os from "os";
 
 const execPromise = promisify(exec);
 
-interface Preferences {
-  defaultModel: "sonnet" | "opus" | "haiku";
-  terminalApp: string;
-  claudeCodePath?: string;
-  oauthToken?: string;
-}
-
 export interface ClaudeResponse {
   result: string;
   session_id?: string;
@@ -57,6 +50,7 @@ export async function getClaudePath(): Promise<string | null> {
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
     path.join(os.homedir(), ".npm-global/bin/claude"),
+    path.join(os.homedir(), ".local/bin/claude"),
   ];
 
   // Try common paths first
@@ -84,7 +78,10 @@ export async function getClaudePath(): Promise<string | null> {
 }
 
 /**
- * Execute a prompt using Claude CLI
+ * Execute a prompt using Claude CLI.
+ *
+ * The default 10-minute timeout covers most reviews of large diffs / contexts.
+ * Callers with shorter or longer expectations can pass `timeoutMs` explicitly.
  */
 export async function executePrompt(
   prompt: string,
@@ -93,6 +90,7 @@ export async function executePrompt(
     context?: string;
     cwd?: string;
     sessionId?: string;
+    timeoutMs?: number;
   } = {},
 ): Promise<ClaudeResponse> {
   const claudePath = await getClaudePath();
@@ -104,6 +102,7 @@ export async function executePrompt(
 
   const preferences = getPreferenceValues<Preferences>();
   const model = options.model || preferences.defaultModel || "sonnet";
+  const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
 
   // Build the full prompt with context
   let fullPrompt = prompt;
@@ -112,11 +111,14 @@ export async function executePrompt(
   }
 
   // Build command args
+  // Use stream-json with verbose to capture all assistant messages
+  // Plain json format returns empty result for agentic/tool-using prompts
   const args: string[] = [
     "-p",
     fullPrompt,
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--model",
     model,
   ];
@@ -125,13 +127,19 @@ export async function executePrompt(
     args.push("-r", options.sessionId);
   }
 
-  // Build environment with OAuth token if available
+  // Build environment with authentication
+  // Supports both Anthropic API key (pay-as-you-go) and OAuth token (Claude subscription)
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin`,
     HOME: os.homedir(),
   };
 
+  // API key takes precedence (direct Anthropic API billing)
+  if (preferences.anthropicApiKey) {
+    env.ANTHROPIC_API_KEY = preferences.anthropicApiKey;
+  }
+  // OAuth token for Claude subscription users
   if (preferences.oauthToken) {
     env.CLAUDE_CODE_OAUTH_TOKEN = preferences.oauthToken;
   }
@@ -146,11 +154,11 @@ export async function executePrompt(
     let stdout = "";
     let stderr = "";
 
-    // Add timeout (2 minutes)
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error("Claude CLI timed out after 2 minutes"));
-    }, 120000);
+      const minutes = Math.round(timeoutMs / 60000);
+      reject(new Error(`Claude CLI timed out after ${minutes} minutes`));
+    }, timeoutMs);
 
     child.stdout.on("data", (data) => {
       stdout += data.toString();
@@ -170,41 +178,69 @@ export async function executePrompt(
       try {
         // Parse the JSON output - may have multiple JSON lines (streaming format)
         const lines = stdout.trim().split("\n").filter(Boolean);
-        let result = "";
+        let accumulatedContent = ""; // Content from assistant messages
+        let resultFieldContent = ""; // Content from result.result field
         let sessionId: string | undefined;
         let totalCost: number | undefined;
         let usage: { input_tokens: number; output_tokens: number } | undefined;
+        let parsedAnyJson = false;
 
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line);
+            parsedAnyJson = true;
+
             if (parsed.type === "result") {
-              result = parsed.result || "";
+              // Get metadata from result line
               sessionId = parsed.session_id;
               totalCost = parsed.total_cost_usd;
               usage = parsed.usage;
+              // Only use result field if it has content
+              if (parsed.result) {
+                resultFieldContent = parsed.result;
+              }
             } else if (parsed.type === "assistant" && parsed.message?.content) {
-              // Handle streamed content
+              // Handle assistant message content blocks
               for (const block of parsed.message.content) {
                 if (block.type === "text") {
-                  result += block.text;
+                  accumulatedContent += block.text;
                 }
               }
             } else if (parsed.result) {
-              // Direct result format
-              result = parsed.result;
+              // Direct result format (non-type response)
+              resultFieldContent = parsed.result;
               sessionId = parsed.session_id;
               totalCost = parsed.total_cost_usd;
               usage = parsed.usage;
             }
           } catch {
             // Not valid JSON, might be plain text
-            result += line;
+            accumulatedContent += line;
           }
         }
 
+        // Prefer accumulated content from assistant messages,
+        // fall back to result field
+        let finalResult = accumulatedContent || resultFieldContent;
+
+        // If we parsed JSON but have no content, and there was meaningful output,
+        // this indicates the CLI returned data in an unexpected format
+        if (
+          !finalResult &&
+          parsedAnyJson &&
+          usage?.output_tokens &&
+          usage.output_tokens > 0
+        ) {
+          // The CLI generated output but we couldn't extract it - return the raw JSON
+          // so the user at least sees something (better than empty)
+          finalResult = stdout;
+        } else if (!finalResult && !parsedAnyJson) {
+          // Couldn't parse any JSON, return raw stdout
+          finalResult = stdout;
+        }
+
         resolve({
-          result: result || stdout,
+          result: finalResult || "",
           session_id: sessionId,
           total_cost_usd: totalCost,
           usage,
@@ -261,13 +297,19 @@ export async function executePromptStreaming(
     model,
   ];
 
-  // Build environment with OAuth token if available
+  // Build environment with authentication
+  // Supports both Anthropic API key (pay-as-you-go) and OAuth token (Claude subscription)
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin`,
     HOME: os.homedir(),
   };
 
+  // API key takes precedence (direct Anthropic API billing)
+  if (preferences.anthropicApiKey) {
+    env.ANTHROPIC_API_KEY = preferences.anthropicApiKey;
+  }
+  // OAuth token for Claude subscription users
   if (preferences.oauthToken) {
     env.CLAUDE_CODE_OAUTH_TOKEN = preferences.oauthToken;
   }
@@ -335,6 +377,68 @@ export async function executePromptStreaming(
 export async function isClaudeInstalled(): Promise<boolean> {
   const path = await getClaudePath();
   return path !== null;
+}
+
+/**
+ * Ensure Claude CLI is installed, showing a toast if not
+ * Returns true if installed, false otherwise
+ */
+export async function ensureClaudeInstalled(): Promise<boolean> {
+  const installed = await isClaudeInstalled();
+  if (!installed) {
+    const { showToast, Toast } = await import("@raycast/api");
+    await showToast({
+      style: Toast.Style.Failure,
+      title: "Claude Code not installed",
+      message: "Install: npm install -g @anthropic-ai/claude-code",
+    });
+  }
+  return installed;
+}
+
+// Accepts Raycast prefs, ANTHROPIC_API_KEY/CLAUDE_CODE_OAUTH_TOKEN env vars,
+// or `claude auth status --json` reporting loggedIn (covers `claude auth login`).
+export async function isAuthConfigured(): Promise<boolean> {
+  const { getPreferenceValues } = await import("@raycast/api");
+  const preferences = getPreferenceValues<Preferences>();
+  if (preferences.anthropicApiKey || preferences.oauthToken) return true;
+  if (
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.ANTHROPIC_AUTH_TOKEN ||
+    process.env.CLAUDE_CODE_OAUTH_TOKEN
+  )
+    return true;
+
+  const claudePath = await getClaudePath();
+  if (!claudePath) return false;
+  try {
+    const { stdout } = await execPromise(`"${claudePath}" auth status --json`, {
+      timeout: 3000,
+    });
+    const parsed = JSON.parse(stdout);
+    return parsed?.loggedIn === true;
+  } catch {
+    return false;
+  }
+}
+
+// Bail early when no auth is available; otherwise the spawned claude would
+// stall on its own /login prompt inside the non-interactive child process.
+export async function ensureClaudeApiAuth(): Promise<boolean> {
+  if (await isAuthConfigured()) return true;
+  const { showToast, Toast, openCommandPreferences } =
+    await import("@raycast/api");
+  await showToast({
+    style: Toast.Style.Failure,
+    title: "Claude authentication missing",
+    message:
+      "Run 'claude setup-token' or 'claude auth login', set ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN/CLAUDE_CODE_OAUTH_TOKEN, or add credentials in Raycast preferences",
+    primaryAction: {
+      title: "Open Preferences",
+      onAction: () => openCommandPreferences(),
+    },
+  });
+  return false;
 }
 
 /**

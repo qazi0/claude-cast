@@ -13,6 +13,7 @@ import {
   getPreferenceValues,
 } from "@raycast/api";
 import React, { useState, useEffect } from "react";
+import { existsSync, mkdirSync } from "fs";
 import {
   getAllPrompts,
   PromptTemplate,
@@ -23,13 +24,18 @@ import {
   incrementUsageCount,
   deleteCustomPrompt,
 } from "./lib/prompts";
-import { executePrompt, ClaudeResponse } from "./lib/claude-cli";
+import {
+  executePrompt,
+  ClaudeResponse,
+  ensureClaudeApiAuth,
+  ensureClaudeInstalled,
+} from "./lib/claude-cli";
 import { captureContext, getCodeContext } from "./lib/context-capture";
-import { launchClaudeCode } from "./lib/terminal";
-
-interface Preferences {
-  defaultModel: "sonnet" | "opus" | "haiku";
-}
+import {
+  launchClaudeCode,
+  launchRalphFreshLoop,
+  expandTilde,
+} from "./lib/terminal";
 
 const CATEGORIES: PromptCategory[] = [
   "planning",
@@ -40,6 +46,14 @@ const CATEGORIES: PromptCategory[] = [
   "docs",
   "advanced",
 ];
+
+// Convert camelCase to Title Case (e.g., "projectPath" -> "Project Path")
+function formatVariableName(name: string): string {
+  return name
+    .replace(/([A-Z])/g, " $1") // Add space before capitals
+    .replace(/^./, (str) => str.toUpperCase()) // Capitalize first letter
+    .trim();
+}
 
 export default function PromptLibrary() {
   const [isLoading, setIsLoading] = useState(true);
@@ -107,7 +121,8 @@ export default function PromptLibrary() {
               return (
                 <List.Dropdown.Item
                   key={cat}
-                  title={`${info.icon} ${info.name}`}
+                  icon={{ source: info.icon, tintColor: info.tintColor }}
+                  title={info.name}
                   value={cat}
                 />
               );
@@ -123,7 +138,7 @@ export default function PromptLibrary() {
             return (
               <List.Section
                 key={category}
-                title={`${info.icon} ${info.name}`}
+                title={info.name}
                 subtitle={`${catPrompts.length} prompts`}
               >
                 {catPrompts.map((prompt) => (
@@ -196,11 +211,22 @@ function PromptItem({
   }
 
   async function runInTerminal(variables: Record<string, string> = {}) {
+    if (!(await ensureClaudeInstalled())) return;
     const context = await captureContext();
+    const targetPath =
+      expandTilde(variables.projectPath || "") || context.projectPath;
+    if (targetPath && !existsSync(targetPath)) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Project path no longer exists",
+        message: targetPath,
+      });
+      return;
+    }
     const fullPrompt = substituteVariables(prompt.prompt, variables);
     await incrementUsageCount(prompt.id);
     await launchClaudeCode({
-      projectPath: context.projectPath,
+      projectPath: targetPath,
       prompt: fullPrompt,
     });
     await popToRoot();
@@ -208,8 +234,12 @@ function PromptItem({
 
   return (
     <List.Item
-      title={`${prompt.icon || info.icon} ${prompt.name}`}
+      title={prompt.name}
       subtitle={prompt.description}
+      icon={{
+        source: prompt.icon || info.icon,
+        tintColor: prompt.tintColor || info.tintColor,
+      }}
       accessories={accessories}
       actions={
         <ActionPanel>
@@ -227,23 +257,28 @@ function PromptItem({
                 onAction={() => runInTerminal()}
               />
             )}
-            {prompt.variables.length > 0 ? (
-              <Action.Push
-                title="Quick Execute in Raycast"
-                icon={Icon.Play}
-                shortcut={{ modifiers: ["cmd"], key: "e" }}
-                target={<PromptVariablesForm prompt={prompt} mode="raycast" />}
-              />
-            ) : (
-              <Action
-                title="Quick Execute in Raycast"
-                icon={Icon.Play}
-                shortcut={{ modifiers: ["cmd"], key: "e" }}
-                onAction={async () => {
-                  push(<ExecutingPromptView prompt={prompt} variables={{}} />);
-                }}
-              />
-            )}
+            {!prompt.terminalOnly &&
+              (prompt.variables.length > 0 ? (
+                <Action.Push
+                  title="Quick Execute in Raycast"
+                  icon={Icon.Play}
+                  shortcut={{ modifiers: ["cmd"], key: "e" }}
+                  target={
+                    <PromptVariablesForm prompt={prompt} mode="raycast" />
+                  }
+                />
+              ) : (
+                <Action
+                  title="Quick Execute in Raycast"
+                  icon={Icon.Play}
+                  shortcut={{ modifiers: ["cmd"], key: "e" }}
+                  onAction={async () => {
+                    push(
+                      <ExecutingPromptView prompt={prompt} variables={{}} />,
+                    );
+                  }}
+                />
+              ))}
             <Action.Push
               title="View Prompt"
               icon={Icon.Eye}
@@ -390,9 +425,11 @@ function PromptVariablesForm({
       }
     }
 
-    // Check if all required variables are provided (skip optional path variables)
+    // Check if all required variables are provided
+    // For ralph-loop, projectPath is required; for others, path variables are optional
+    const isRalphLoop = prompt.id === "ralph-loop";
     for (const variable of prompt.variables) {
-      const isOptionalPath = variable.type === "path";
+      const isOptionalPath = variable.type === "path" && !isRalphLoop;
       if (
         !processedValues[variable.name]?.trim() &&
         !variable.default &&
@@ -406,13 +443,76 @@ function PromptVariablesForm({
       }
     }
 
+    // Special handling for ralph-loop - create project directory if needed
+    if (isRalphLoop) {
+      const projectPath = expandTilde(processedValues.projectPath || "");
+      if (projectPath && !existsSync(projectPath)) {
+        try {
+          mkdirSync(projectPath, { recursive: true });
+          await showToast({
+            style: Toast.Style.Success,
+            title: `Created directory: ${projectPath}`,
+          });
+        } catch (error) {
+          await showToast({
+            style: Toast.Style.Failure,
+            title: "Failed to create directory",
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
+      }
+    }
+
     if (mode === "terminal") {
       // Run in terminal
       const context = await captureContext();
-      const fullPrompt = substituteVariables(prompt.prompt, processedValues);
       await incrementUsageCount(prompt.id);
+      // Use user-specified projectPath if provided, otherwise fall back to context
+      const targetPath =
+        expandTilde(processedValues.projectPath || "") || context.projectPath;
+
+      // Special handling for Ralph Loop - use fresh context launcher
+      if (isRalphLoop) {
+        if (!targetPath) {
+          await showToast({
+            style: Toast.Style.Failure,
+            title: "Project path required for Ralph Loop",
+          });
+          return;
+        }
+
+        // Show animated loading toast while preparing Ralph Loop
+        const loadingToast = await showToast({
+          style: Toast.Style.Animated,
+          title: "Preparing Ralph Loop...",
+          message: "Please wait for terminal to launch",
+        });
+
+        try {
+          await launchRalphFreshLoop({
+            projectPath: targetPath,
+            task: processedValues.task || "",
+            requirements: processedValues.requirements || "",
+            maxIterations: parseInt(processedValues.maxIterations || "20", 10),
+          });
+          loadingToast.style = Toast.Style.Success;
+          loadingToast.title = "Ralph Loop launched";
+          loadingToast.message = undefined;
+          await popToRoot();
+        } catch (error) {
+          loadingToast.style = Toast.Style.Failure;
+          loadingToast.title = "Failed to launch Ralph Loop";
+          loadingToast.message =
+            error instanceof Error ? error.message : String(error);
+        }
+        return;
+      }
+
+      // Regular prompt execution
+      const fullPrompt = substituteVariables(prompt.prompt, processedValues);
       await launchClaudeCode({
-        projectPath: context.projectPath,
+        projectPath: targetPath,
         prompt: fullPrompt,
       });
       await popToRoot();
@@ -440,13 +540,26 @@ function PromptVariablesForm({
       <Form.Description title="Prompt" text={prompt.name} />
 
       {prompt.variables.map((variable) => {
-        // For path type variables (like projectPath), show FilePicker
+        // For ralph-loop projectPath, use TextField so user can enter new paths
+        if (prompt.id === "ralph-loop" && variable.name === "projectPath") {
+          return (
+            <Form.TextField
+              key={variable.name}
+              id={variable.name}
+              title={formatVariableName(variable.name)}
+              placeholder="/path/to/project"
+              info={variable.description}
+            />
+          );
+        }
+
+        // For other path type variables, show FilePicker
         if (variable.type === "path") {
           return (
             <Form.FilePicker
               key={variable.name}
               id={variable.name}
-              title={variable.name}
+              title={formatVariableName(variable.name)}
               info={variable.description}
               allowMultipleSelection={false}
               canChooseDirectories={variable.allowDirectories !== false}
@@ -466,7 +579,7 @@ function PromptVariablesForm({
             <React.Fragment key={variable.name}>
               <Form.Dropdown
                 id={`${variable.name}_mode`}
-                title={`${variable.name} Input Type`}
+                title={`${formatVariableName(variable.name)} Input Type`}
                 value={currentMode}
                 onChange={(value) => {
                   setInputModes((prev) => ({
@@ -490,7 +603,7 @@ function PromptVariablesForm({
               {currentMode === "code" ? (
                 <Form.TextArea
                   id={variable.name}
-                  title={variable.name}
+                  title={formatVariableName(variable.name)}
                   placeholder={variable.description}
                   defaultValue={codeContext || variable.default}
                   info={variable.description}
@@ -498,7 +611,7 @@ function PromptVariablesForm({
               ) : (
                 <Form.FilePicker
                   id={variable.name}
-                  title={variable.name}
+                  title={formatVariableName(variable.name)}
                   info={`Select a repository folder for: ${variable.description}`}
                   allowMultipleSelection={false}
                   canChooseDirectories={true}
@@ -518,7 +631,7 @@ function PromptVariablesForm({
             <Form.TextArea
               key={variable.name}
               id={variable.name}
-              title={variable.name}
+              title={formatVariableName(variable.name)}
               placeholder={variable.description}
               defaultValue={codeContext || variable.default}
               info={variable.description}
@@ -532,10 +645,25 @@ function PromptVariablesForm({
             <Form.TextArea
               key={variable.name}
               id={variable.name}
-              title={variable.name}
+              title={formatVariableName(variable.name)}
               placeholder={variable.description}
               defaultValue={codeContext || variable.default}
               info={variable.description}
+            />
+          );
+        }
+
+        // For multiline text variables, use larger TextArea
+        if (variable.multiline) {
+          return (
+            <Form.TextArea
+              key={variable.name}
+              id={variable.name}
+              title={formatVariableName(variable.name)}
+              placeholder={variable.description}
+              defaultValue={variable.default}
+              info={variable.description}
+              enableMarkdown={false}
             />
           );
         }
@@ -545,7 +673,7 @@ function PromptVariablesForm({
           <Form.TextField
             key={variable.name}
             id={variable.name}
-            title={variable.name}
+            title={formatVariableName(variable.name)}
             placeholder={variable.description}
             defaultValue={variable.default}
             info={variable.description}
@@ -563,15 +691,35 @@ function ExecutingPromptView({
   prompt: PromptTemplate;
   variables: Record<string, string>;
 }) {
+  // Uses auto-generated Preferences type from raycast-env.d.ts
   const preferences = getPreferenceValues<Preferences>();
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<ClaudeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projectPath, setProjectPath] = useState<string | undefined>();
+  // Track if we've already executed to prevent re-running on re-renders
+  const hasExecutedRef = React.useRef(false);
 
   useEffect(() => {
+    // Guard against re-execution (React 18 strict mode or re-renders)
+    if (hasExecutedRef.current) {
+      return;
+    }
+    hasExecutedRef.current = true;
+
     async function execute() {
       try {
+        if (!(await ensureClaudeInstalled())) {
+          setError("Claude Code not installed");
+          setIsLoading(false);
+          return;
+        }
+        if (!(await ensureClaudeApiAuth())) {
+          setError("Claude authentication missing");
+          setIsLoading(false);
+          return;
+        }
+
         // Get project context
         const context = await captureContext();
         setProjectPath(context.projectPath);
@@ -597,6 +745,8 @@ function ExecutingPromptView({
     }
 
     execute();
+    // Run only once on mount - variables are captured in closure
+    // eslint-disable-next-line
   }, []);
 
   if (isLoading) {

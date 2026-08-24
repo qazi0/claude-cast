@@ -8,8 +8,11 @@ import {
   Toast,
   Form,
   popToRoot,
+  getPreferenceValues,
 } from "@raycast/api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { existsSync } from "fs";
+import { ensureClaudeInstalled } from "./lib/claude-cli";
 import {
   getAllProjects,
   addFavorite,
@@ -19,6 +22,13 @@ import {
   Project,
 } from "./lib/project-discovery";
 import { launchClaudeCode, openTerminalWithCommand } from "./lib/terminal";
+import type { PermissionMode } from "./lib/session-parser";
+
+// Type for batched git info
+type GitInfoMap = Record<
+  string,
+  { branch: string; hasChanges: boolean; remote?: string } | null
+>;
 
 export default function LaunchProject() {
   const [isLoading, setIsLoading] = useState(true);
@@ -26,28 +36,64 @@ export default function LaunchProject() {
   const [recent, setRecent] = useState<Project[]>([]);
   const [all, setAll] = useState<Project[]>([]);
   const [searchText, setSearchText] = useState("");
+  const [gitInfoMap, setGitInfoMap] = useState<GitInfoMap>({});
 
-  async function loadProjects() {
+  const loadProjects = useCallback(async () => {
     setIsLoading(true);
     const projects = await getAllProjects();
     setFavorites(projects.favorites);
     setRecent(projects.recent);
     setAll(projects.all);
     setIsLoading(false);
-  }
+
+    // Batch load git info for all projects
+    const allProjects = [
+      ...projects.favorites,
+      ...projects.recent,
+      ...projects.all,
+    ];
+    const uniquePaths = [...new Set(allProjects.map((p) => p.path))];
+
+    // Load git info in parallel with error handling
+    const gitInfoEntries = await Promise.all(
+      uniquePaths.map(async (projectPath) => {
+        try {
+          const info = await getGitInfo(projectPath);
+          return [projectPath, info] as const;
+        } catch {
+          return [projectPath, null] as const;
+        }
+      }),
+    );
+
+    setGitInfoMap(Object.fromEntries(gitInfoEntries));
+  }, []);
 
   useEffect(() => {
     loadProjects();
-  }, []);
+  }, [loadProjects]);
 
-  const filteredFavorites = favorites.filter((p) =>
-    p.name.toLowerCase().includes(searchText.toLowerCase()),
+  // Memoize filtered lists to avoid recalculating on every render
+  const filteredFavorites = useMemo(
+    () =>
+      favorites.filter((p) =>
+        p.name.toLowerCase().includes(searchText.toLowerCase()),
+      ),
+    [favorites, searchText],
   );
-  const filteredRecent = recent.filter((p) =>
-    p.name.toLowerCase().includes(searchText.toLowerCase()),
+  const filteredRecent = useMemo(
+    () =>
+      recent.filter((p) =>
+        p.name.toLowerCase().includes(searchText.toLowerCase()),
+      ),
+    [recent, searchText],
   );
-  const filteredAll = all.filter((p) =>
-    p.name.toLowerCase().includes(searchText.toLowerCase()),
+  const filteredAll = useMemo(
+    () =>
+      all.filter((p) =>
+        p.name.toLowerCase().includes(searchText.toLowerCase()),
+      ),
+    [all, searchText],
   );
 
   return (
@@ -65,6 +111,7 @@ export default function LaunchProject() {
             <ProjectItem
               key={project.path}
               project={project}
+              gitInfo={gitInfoMap[project.path]}
               onToggleFavorite={async () => {
                 await removeFavorite(project.path);
                 loadProjects();
@@ -83,6 +130,7 @@ export default function LaunchProject() {
             <ProjectItem
               key={project.path}
               project={project}
+              gitInfo={gitInfoMap[project.path]}
               onToggleFavorite={async () => {
                 await addFavorite(project.path);
                 loadProjects();
@@ -101,6 +149,7 @@ export default function LaunchProject() {
             <ProjectItem
               key={project.path}
               project={project}
+              gitInfo={gitInfoMap[project.path]}
               onToggleFavorite={async () => {
                 await addFavorite(project.path);
                 loadProjects();
@@ -126,21 +175,16 @@ export default function LaunchProject() {
 
 function ProjectItem({
   project,
+  gitInfo,
   onToggleFavorite,
 }: {
   project: Project;
+  gitInfo:
+    | { branch: string; hasChanges: boolean; remote?: string }
+    | null
+    | undefined;
   onToggleFavorite: () => void;
 }) {
-  const [gitInfo, setGitInfo] = useState<{
-    branch: string;
-    hasChanges: boolean;
-    remote?: string;
-  } | null>(null);
-
-  useEffect(() => {
-    getGitInfo(project.path).then(setGitInfo);
-  }, [project.path]);
-
   const accessories: List.Item.Accessory[] = [];
 
   if (project.sessionCount && project.sessionCount > 0) {
@@ -168,16 +212,48 @@ function ProjectItem({
   }
 
   async function handleLaunch() {
+    if (!(await ensureClaudeInstalled())) return;
+    if (!existsSync(project.path)) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Project path no longer exists",
+        message: project.path,
+      });
+      return;
+    }
+    const prefs = getPreferenceValues<Preferences.LaunchProject>();
+    const permissionMode = (prefs.permissionMode ||
+      "default") as PermissionMode;
+    const model = prefs.model || undefined;
     await addRecentProject(project.path);
-    await launchClaudeCode({ projectPath: project.path });
+    await launchClaudeCode({
+      projectPath: project.path,
+      permissionMode,
+      model,
+    });
     await popToRoot();
   }
 
   async function handleContinue() {
+    if (!(await ensureClaudeInstalled())) return;
+    if (!existsSync(project.path)) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Project path no longer exists",
+        message: project.path,
+      });
+      return;
+    }
+    const prefs = getPreferenceValues<Preferences.LaunchProject>();
+    const permissionMode = (prefs.permissionMode ||
+      "default") as PermissionMode;
+    const model = prefs.model || undefined;
     await addRecentProject(project.path);
     await launchClaudeCode({
       projectPath: project.path,
       continueSession: true,
+      permissionMode,
+      model,
     });
     await popToRoot();
   }
@@ -209,7 +285,7 @@ function ProjectItem({
             <Action.Push
               title="Continue with Prompt"
               icon={Icon.Message}
-              shortcut={{ modifiers: ["cmd"], key: "p" }}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
               target={<ContinueWithPromptForm project={project} />}
             />
           </ActionPanel.Section>
@@ -224,7 +300,9 @@ function ProjectItem({
                 await popToRoot();
               }}
             />
-            <Action.ShowInFinder path={project.path} />
+            {existsSync(project.path) && (
+              <Action.ShowInFinder path={project.path} />
+            )}
             <Action
               title="Open in Terminal"
               icon={Icon.Terminal}
@@ -271,12 +349,28 @@ function ContinueWithPromptForm({ project }: { project: Project }) {
       return;
     }
 
+    if (!(await ensureClaudeInstalled())) return;
+    if (!existsSync(project.path)) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Project path no longer exists",
+        message: project.path,
+      });
+      return;
+    }
+
+    const prefs = getPreferenceValues<Preferences.LaunchProject>();
+    const permissionMode = (prefs.permissionMode ||
+      "default") as PermissionMode;
+    const model = prefs.model || undefined;
     setIsLoading(true);
     await addRecentProject(project.path);
     await launchClaudeCode({
       projectPath: project.path,
       continueSession: true,
       prompt: values.prompt,
+      permissionMode,
+      model,
     });
     await popToRoot();
   }
